@@ -1,145 +1,91 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { CircuitBreakerConfig, CIRCUIT_BREAKER_CONFIG } from 'src/config/resilience.config';
 
 export enum CircuitState {
   CLOSED = 'CLOSED',
-  OPEN = 'OPEN',
+  OPEN = 'OPEN', 
   HALF_OPEN = 'HALF_OPEN',
 }
 
-interface CircuitBreakerStats {
-  failureCount: number;
-  successCount: number;
-  lastFailureTime?: number;
-  state: CircuitState;
-  nextAttempt?: number;
+export interface CircuitBreakerConfig {
+  failureThreshold: number;
+  recoveryTimeout: number;
+  monitorTimeout: number;
+  name: string;
 }
 
 @Injectable()
 export class CircuitBreakerService {
   private readonly logger = new Logger(CircuitBreakerService.name);
-  private readonly circuits = new Map<string, CircuitBreakerStats>();
+  private circuits = new Map<string, CircuitBreakerState>();
 
   async execute<T>(
-    serviceKey: string,
+    serviceName: string,
     operation: () => Promise<T>,
-    fallback?: () => Promise<T>,
+    config: CircuitBreakerConfig,
   ): Promise<T> {
-    const config = CIRCUIT_BREAKER_CONFIG[serviceKey];
-    if (!config) {
-      this.logger.warn(`No circuit breaker config found for service: ${serviceKey}`);
-      return operation();
-    }
+    const circuit = this.getCircuit(serviceName, config);
 
-    const circuit = this.getOrCreateCircuit(serviceKey);
-
-    if (this.isCircuitOpen(circuit, config)) {
-      this.logger.warn(`Circuit breaker OPEN for service: ${serviceKey}`);
-      
-      if (fallback) {
-        return fallback();
+    if (circuit.state === CircuitState.OPEN) {
+      if (Date.now() - circuit.lastFailureTime < config.recoveryTimeout) {
+        throw new Error(`Circuit breaker is OPEN for ${serviceName}`);
       }
-      
-      throw new Error(`Circuit breaker is OPEN for service: ${serviceKey}`);
+      circuit.state = CircuitState.HALF_OPEN;
+      this.logger.log(`Circuit breaker ${serviceName} moved to HALF_OPEN`);
     }
 
     try {
       const result = await operation();
-      this.onSuccess(serviceKey, circuit, config);
-      return result;
-    } catch (error) {
-      this.onFailure(serviceKey, circuit, config, error);
       
-      if (fallback && this.isCircuitOpen(circuit, config)) {
-        this.logger.warn(`Executing fallback for service: ${serviceKey}`);
-        return fallback();
+      if (circuit.state === CircuitState.HALF_OPEN) {
+        circuit.state = CircuitState.CLOSED;
+        circuit.failureCount = 0;
+        this.logger.log(`Circuit breaker ${serviceName} moved to CLOSED`);
       }
       
+      return result;
+    } catch (error) {
+      circuit.failureCount++;
+      circuit.lastFailureTime = Date.now();
+
+      if (circuit.failureCount >= config.failureThreshold) {
+        circuit.state = CircuitState.OPEN;
+        this.logger.error(`Circuit breaker ${serviceName} moved to OPEN`);
+      }
+
       throw error;
     }
   }
 
-  private getOrCreateCircuit(serviceKey: string): CircuitBreakerStats {
-    if (!this.circuits.has(serviceKey)) {
-      this.circuits.set(serviceKey, {
-        failureCount: 0,
-        successCount: 0,
+  private getCircuit(serviceName: string, config: CircuitBreakerConfig): CircuitBreakerState {
+    if (!this.circuits.has(serviceName)) {
+      this.circuits.set(serviceName, {
         state: CircuitState.CLOSED,
+        failureCount: 0,
+        lastFailureTime: 0,
+        config,
       });
     }
-    return this.circuits.get(serviceKey)!;
+    return this.circuits.get(serviceName)!;
   }
 
-  private isCircuitOpen(circuit: CircuitBreakerStats, config: CircuitBreakerConfig): boolean {
-    if (circuit.state === CircuitState.CLOSED) {
-      return false;
-    }
-
-    if (circuit.state === CircuitState.OPEN) {
-      if (circuit.nextAttempt && Date.now() < circuit.nextAttempt) {
-        return true;
-      }
-      
-      // Transition to HALF_OPEN
-      circuit.state = CircuitState.HALF_OPEN;
-      circuit.successCount = 0;
-      this.logger.log(`Circuit breaker transitioning to HALF_OPEN`);
-      return false;
-    }
-
-    return false;
+  getCircuitState(serviceName: string): CircuitState {
+    return this.circuits.get(serviceName)?.state || CircuitState.CLOSED;
   }
 
-  private onSuccess(serviceKey: string, circuit: CircuitBreakerStats, config: CircuitBreakerConfig): void {
-    circuit.successCount++;
-    
-    if (circuit.state === CircuitState.HALF_OPEN) {
-      if (circuit.successCount >= config.successThreshold) {
-        circuit.state = CircuitState.CLOSED;
-        circuit.failureCount = 0;
-        circuit.successCount = 0;
-        this.logger.log(`Circuit breaker CLOSED for service: ${serviceKey}`);
-      }
-    } else if (circuit.state === CircuitState.CLOSED) {
-      // Reset failure count on success
-      circuit.failureCount = 0;
-    }
-  }
-
-  private onFailure(serviceKey: string, circuit: CircuitBreakerStats, config: CircuitBreakerConfig, error: any): void {
-    circuit.failureCount++;
-    circuit.lastFailureTime = Date.now();
-
-    if (circuit.state === CircuitState.CLOSED || circuit.state === CircuitState.HALF_OPEN) {
-      if (circuit.failureCount >= config.failureThreshold) {
-        circuit.state = CircuitState.OPEN;
-        circuit.nextAttempt = Date.now() + config.timeout;
-        this.logger.error(`Circuit breaker OPENED for service: ${serviceKey}. Error: ${error.message}`);
-      }
-    }
-  }
-
-  getCircuitStats(serviceKey: string): CircuitBreakerStats | undefined {
-    return this.circuits.get(serviceKey);
-  }
-
-  getAllCircuitsStats(): Record<string, CircuitBreakerStats> {
-    const stats: Record<string, CircuitBreakerStats> = {};
-    this.circuits.forEach((value, key) => {
-      stats[key] = { ...value };
-    });
-    return stats;
-  }
-
-  resetCircuit(serviceKey: string): void {
-    const circuit = this.circuits.get(serviceKey);
+  resetCircuit(serviceName: string): void {
+    const circuit = this.circuits.get(serviceName);
     if (circuit) {
       circuit.state = CircuitState.CLOSED;
       circuit.failureCount = 0;
-      circuit.successCount = 0;
-      circuit.lastFailureTime = undefined;
-      circuit.nextAttempt = undefined;
-      this.logger.log(`Circuit breaker reset for service: ${serviceKey}`);
+      circuit.lastFailureTime = 0;
+      this.logger.log(`Circuit breaker ${serviceName} reset to CLOSED`);
     }
   }
+}
+
+interface CircuitBreakerState {
+  state: CircuitState;
+  failureCount: number;
+  lastFailureTime: number;
+  config: CircuitBreakerConfig;
 }

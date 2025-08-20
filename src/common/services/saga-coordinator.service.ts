@@ -1,295 +1,217 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventStoreService } from './event-store.service';
-import { SAGA_CONFIG } from 'src/config/resilience.config';
-
-export interface SagaStep {
-  stepId: string;
-  action: () => Promise<any>;
-  compensation: () => Promise<any>;
-  timeout?: number;
-}
-
-export interface SagaDefinition {
-  sagaId: string;
-  steps: SagaStep[];
-  timeout?: number;
-}
+import { v4 as uuidv4 } from 'uuid';
 
 export enum SagaStatus {
-  PENDING = 'PENDING',
-  RUNNING = 'RUNNING',
+  STARTED = 'STARTED',
+  IN_PROGRESS = 'IN_PROGRESS',
+  COMPENSATING = 'COMPENSATING',
   COMPLETED = 'COMPLETED',
   FAILED = 'FAILED',
-  COMPENSATING = 'COMPENSATING',
   COMPENSATED = 'COMPENSATED',
 }
 
-export interface SagaExecution {
-  sagaId: string;
+export interface SagaStep {
+  id: string;
+  name: string;
+  action: () => Promise<any>;
+  compensationAction: () => Promise<void>;
+  executed: boolean;
+  compensated: boolean;
+  result?: any;
+  error?: Error;
+}
+
+export interface SagaDefinition {
+  id: string;
+  name: string;
+  steps: SagaStep[];
   status: SagaStatus;
-  currentStep: number;
-  completedSteps: string[];
-  failedStep?: string;
   startTime: Date;
   endTime?: Date;
-  error?: string;
-  context: any;
+  metadata?: any;
 }
 
 @Injectable()
 export class SagaCoordinatorService {
   private readonly logger = new Logger(SagaCoordinatorService.name);
-  private readonly activeSagas = new Map<string, SagaExecution>();
+  private sagas = new Map<string, SagaDefinition>();
 
   constructor(private readonly eventStore: EventStoreService) {}
 
-  async executeSaga(definition: SagaDefinition, context: any = {}): Promise<string> {
-    const execution: SagaExecution = {
-      sagaId: definition.sagaId,
-      status: SagaStatus.PENDING,
-      currentStep: 0,
-      completedSteps: [],
+  async startSaga(name: string, steps: Omit<SagaStep, 'id' | 'executed' | 'compensated'>[], metadata?: any): Promise<string> {
+    const sagaId = uuidv4();
+    const saga: SagaDefinition = {
+      id: sagaId,
+      name,
+      steps: steps.map(step => ({
+        ...step,
+        id: uuidv4(),
+        executed: false,
+        compensated: false,
+      })),
+      status: SagaStatus.STARTED,
       startTime: new Date(),
-      context,
+      metadata,
     };
 
-    this.activeSagas.set(definition.sagaId, execution);
+    this.sagas.set(sagaId, saga);
 
-    await this.eventStore.appendEvent({
-      aggregateId: definition.sagaId,
-      eventType: 'SAGA_STARTED',
-      eventData: {
-        sagaId: definition.sagaId,
-        steps: definition.steps.map(s => s.stepId),
-        context,
-      },
-      version: 1,
+    await this.eventStore.saveEvent(sagaId, 'SagaStarted', {
+      name,
+      steps: saga.steps.map(s => ({ id: s.id, name: s.name })),
+      metadata,
     });
 
-    try {
-      await this.runSaga(definition, execution);
-      return definition.sagaId;
-    } catch (error) {
-      this.logger.error(`Saga ${definition.sagaId} failed: ${error.message}`);
-      throw error;
-    }
+    this.logger.log(`Saga ${name} started with ID: ${sagaId}`);
+    
+    // Execute saga asynchronously
+    this.executeSaga(sagaId).catch(error => {
+      this.logger.error(`Saga ${sagaId} failed: ${error.message}`, error.stack);
+    });
+
+    return sagaId;
   }
 
-  private async runSaga(definition: SagaDefinition, execution: SagaExecution): Promise<void> {
-    execution.status = SagaStatus.RUNNING;
+  private async executeSaga(sagaId: string): Promise<void> {
+    const saga = this.sagas.get(sagaId);
+    if (!saga) {
+      throw new Error(`Saga ${sagaId} not found`);
+    }
 
-    const timeout = definition.timeout || SAGA_CONFIG.timeout;
-    const sagaTimeout = setTimeout(() => {
-      this.handleSagaTimeout(definition.sagaId);
-    }, timeout);
+    saga.status = SagaStatus.IN_PROGRESS;
 
     try {
-      for (let i = 0; i < definition.steps.length; i++) {
-        const step = definition.steps[i];
-        execution.currentStep = i;
-
-        await this.eventStore.appendEvent({
-          aggregateId: definition.sagaId,
-          eventType: 'SAGA_STEP_STARTED',
-          eventData: {
-            stepId: step.stepId,
-            stepIndex: i,
-          },
-          version: execution.completedSteps.length + 2,
-        });
-
+      for (const step of saga.steps) {
+        this.logger.debug(`Executing step: ${step.name} in saga ${sagaId}`);
+        
         try {
-          const stepTimeout = step.timeout || SAGA_CONFIG.timeout;
-          const result = await Promise.race([
-            step.action(),
-            this.createTimeoutPromise(stepTimeout, `Step ${step.stepId} timed out`),
-          ]);
+          step.result = await step.action();
+          step.executed = true;
 
-          execution.completedSteps.push(step.stepId);
-          execution.context.stepResults = execution.context.stepResults || {};
-          execution.context.stepResults[step.stepId] = result;
-
-          await this.eventStore.appendEvent({
-            aggregateId: definition.sagaId,
-            eventType: 'SAGA_STEP_COMPLETED',
-            eventData: {
-              stepId: step.stepId,
-              stepIndex: i,
-              result,
-            },
-            version: execution.completedSteps.length + 1,
+          await this.eventStore.saveEvent(sagaId, 'StepCompleted', {
+            stepId: step.id,
+            stepName: step.name,
+            result: step.result,
           });
 
-          this.logger.debug(`Saga ${definition.sagaId} completed step ${step.stepId}`);
-
+          this.logger.debug(`Step ${step.name} completed successfully`);
         } catch (error) {
-          execution.status = SagaStatus.FAILED;
-          execution.failedStep = step.stepId;
-          execution.error = error.message;
-
-          await this.eventStore.appendEvent({
-            aggregateId: definition.sagaId,
-            eventType: 'SAGA_STEP_FAILED',
-            eventData: {
-              stepId: step.stepId,
-              stepIndex: i,
-              error: error.message,
-            },
-            version: execution.completedSteps.length + 2,
+          step.error = error as Error;
+          
+          await this.eventStore.saveEvent(sagaId, 'StepFailed', {
+            stepId: step.id,
+            stepName: step.name,
+            error: error.message,
           });
 
-          this.logger.error(`Saga ${definition.sagaId} step ${step.stepId} failed: ${error.message}`);
-
-          // Start compensation
-          await this.compensateSaga(definition, execution);
+          this.logger.error(`Step ${step.name} failed: ${error.message}`);
           throw error;
         }
       }
 
-      // All steps completed successfully
-      execution.status = SagaStatus.COMPLETED;
-      execution.endTime = new Date();
+      saga.status = SagaStatus.COMPLETED;
+      saga.endTime = new Date();
 
-      await this.eventStore.appendEvent({
-        aggregateId: definition.sagaId,
-        eventType: 'SAGA_COMPLETED',
-        eventData: {
-          sagaId: definition.sagaId,
-          duration: execution.endTime.getTime() - execution.startTime.getTime(),
-        },
-        version: execution.completedSteps.length + 2,
+      await this.eventStore.saveEvent(sagaId, 'SagaCompleted', {
+        duration: saga.endTime.getTime() - saga.startTime.getTime(),
       });
 
-      this.logger.log(`Saga ${definition.sagaId} completed successfully`);
+      this.logger.log(`Saga ${sagaId} completed successfully`);
+    } catch (error) {
+      saga.status = SagaStatus.COMPENSATING;
+      
+      await this.eventStore.saveEvent(sagaId, 'SagaFailed', {
+        error: error.message,
+        failedStep: saga.steps.find(s => s.error)?.name,
+      });
 
-    } finally {
-      clearTimeout(sagaTimeout);
-      this.activeSagas.delete(definition.sagaId);
+      await this.compensateSaga(sagaId);
     }
   }
 
-  private async compensateSaga(definition: SagaDefinition, execution: SagaExecution): Promise<void> {
-    execution.status = SagaStatus.COMPENSATING;
-
-    await this.eventStore.appendEvent({
-      aggregateId: definition.sagaId,
-      eventType: 'SAGA_COMPENSATION_STARTED',
-      eventData: {
-        failedStep: execution.failedStep,
-        completedSteps: execution.completedSteps,
-      },
-      version: execution.completedSteps.length + 3,
-    });
-
-    this.logger.log(`Starting compensation for saga ${definition.sagaId}`);
-
-    // Compensate in reverse order
-    for (let i = execution.completedSteps.length - 1; i >= 0; i--) {
-      const stepId = execution.completedSteps[i];
-      const step = definition.steps.find(s => s.stepId === stepId);
-
-      if (!step) {
-        this.logger.warn(`Step ${stepId} not found for compensation`);
-        continue;
-      }
-
-      try {
-        const compensationTimeout = SAGA_CONFIG.compensationTimeout;
-        await Promise.race([
-          step.compensation(),
-          this.createTimeoutPromise(compensationTimeout, `Compensation for step ${stepId} timed out`),
-        ]);
-
-        await this.eventStore.appendEvent({
-          aggregateId: definition.sagaId,
-          eventType: 'SAGA_STEP_COMPENSATED',
-          eventData: { stepId },
-          version: execution.completedSteps.length + 4 + (execution.completedSteps.length - 1 - i),
-        });
-
-        this.logger.debug(`Compensated step ${stepId} for saga ${definition.sagaId}`);
-
-      } catch (error) {
-        this.logger.error(`Failed to compensate step ${stepId}: ${error.message}`);
-        
-        await this.eventStore.appendEvent({
-          aggregateId: definition.sagaId,
-          eventType: 'SAGA_COMPENSATION_FAILED',
-          eventData: {
-            stepId,
-            error: error.message,
-          },
-          version: execution.completedSteps.length + 4 + (execution.completedSteps.length - 1 - i),
-        });
-      }
-    }
-
-    execution.status = SagaStatus.COMPENSATED;
-    execution.endTime = new Date();
-
-    await this.eventStore.appendEvent({
-      aggregateId: definition.sagaId,
-      eventType: 'SAGA_COMPENSATED',
-      eventData: {
-        sagaId: definition.sagaId,
-        duration: execution.endTime.getTime() - execution.startTime.getTime(),
-      },
-      version: execution.completedSteps.length + 20,
-    });
-
-    this.logger.log(`Saga ${definition.sagaId} compensation completed`);
-  }
-
-  private async handleSagaTimeout(sagaId: string): Promise<void> {
-    const execution = this.activeSagas.get(sagaId);
-    if (!execution) return;
-
-    execution.status = SagaStatus.FAILED;
-    execution.error = 'Saga timeout';
-    execution.endTime = new Date();
-
-    await this.eventStore.appendEvent({
-      aggregateId: sagaId,
-      eventType: 'SAGA_TIMEOUT',
-      eventData: {
-        sagaId,
-        currentStep: execution.currentStep,
-      },
-      version: execution.completedSteps.length + 10,
-    });
-
-    this.logger.error(`Saga ${sagaId} timed out`);
-  }
-
-  private createTimeoutPromise(timeout: number, message: string): Promise<never> {
-    return new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(message)), timeout);
-    });
-  }
-
-  getSagaStatus(sagaId: string): SagaExecution | undefined {
-    return this.activeSagas.get(sagaId);
-  }
-
-  async getSagaHistory(sagaId: string): Promise<any[]> {
-    const events = await this.eventStore.getEvents(sagaId);
-    return events.filter(event => event.eventType.startsWith('SAGA_'));
-  }
-
-  getActiveSagas(): SagaExecution[] {
-    return Array.from(this.activeSagas.values());
-  }
-
-  async retrySaga(sagaId: string): Promise<void> {
-    // Implementation for retrying failed sagas
-    const events = await this.eventStore.getEvents(sagaId);
-    const sagaStartEvent = events.find(e => e.eventType === 'SAGA_STARTED');
-    
-    if (!sagaStartEvent) {
+  private async compensateSaga(sagaId: string): Promise<void> {
+    const saga = this.sagas.get(sagaId);
+    if (!saga) {
       throw new Error(`Saga ${sagaId} not found`);
     }
 
+    this.logger.warn(`Starting compensation for saga ${sagaId}`);
+
+    // Execute compensation actions in reverse order
+    const executedSteps = saga.steps.filter(step => step.executed).reverse();
+
+    for (const step of executedSteps) {
+      try {
+        this.logger.debug(`Compensating step: ${step.name}`);
+        
+        await step.compensationAction();
+        step.compensated = true;
+
+        await this.eventStore.saveEvent(sagaId, 'StepCompensated', {
+          stepId: step.id,
+          stepName: step.name,
+        });
+
+        this.logger.debug(`Step ${step.name} compensated successfully`);
+      } catch (error) {
+        this.logger.error(`Compensation failed for step ${step.name}: ${error.message}`);
+        
+        await this.eventStore.saveEvent(sagaId, 'CompensationFailed', {
+          stepId: step.id,
+          stepName: step.name,
+          error: error.message,
+        });
+      }
+    }
+
+    saga.status = SagaStatus.COMPENSATED;
+    saga.endTime = new Date();
+
+    await this.eventStore.saveEvent(sagaId, 'SagaCompensated', {
+      duration: saga.endTime.getTime() - saga.startTime.getTime(),
+    });
+
+    this.logger.log(`Saga ${sagaId} compensation completed`);
+  }
+
+  async getSaga(sagaId: string): Promise<SagaDefinition | undefined> {
+    return this.sagas.get(sagaId);
+  }
+
+  async getAllSagas(): Promise<SagaDefinition[]> {
+    return Array.from(this.sagas.values());
+  }
+
+  async getSagasByStatus(status: SagaStatus): Promise<SagaDefinition[]> {
+    return Array.from(this.sagas.values()).filter(saga => saga.status === status);
+  }
+
+  async retrySaga(sagaId: string): Promise<void> {
+    const saga = this.sagas.get(sagaId);
+    if (!saga) {
+      throw new Error(`Saga ${sagaId} not found`);
+    }
+
+    if (saga.status !== SagaStatus.FAILED && saga.status !== SagaStatus.COMPENSATED) {
+      throw new Error(`Cannot retry saga in status: ${saga.status}`);
+    }
+
+    // Reset saga state
+    saga.steps.forEach(step => {
+      step.executed = false;
+      step.compensated = false;
+      step.result = undefined;
+      step.error = undefined;
+    });
+
+    saga.status = SagaStatus.STARTED;
+    saga.startTime = new Date();
+    saga.endTime = undefined;
+
+    await this.eventStore.saveEvent(sagaId, 'SagaRetried', {});
+
     this.logger.log(`Retrying saga ${sagaId}`);
-    // Implementation would reconstruct and retry the saga
+    await this.executeSaga(sagaId);
   }
 }

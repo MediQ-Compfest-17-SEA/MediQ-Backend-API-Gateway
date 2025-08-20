@@ -1,0 +1,225 @@
+name: API Gateway CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths: 
+      - 'MediQ-Backend-API-Gateway/**'
+      - '.github/workflows/api-gateway.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'MediQ-Backend-API-Gateway/**'
+
+env:
+  SERVICE_NAME: api-gateway
+  SERVICE_PATH: MediQ-Backend-API-Gateway
+  DOCKER_IMAGE: mediq/api-gateway
+  PORT: 8601
+
+jobs:
+  test:
+    name: Test & Build
+    runs-on: ubuntu-latest
+    
+    services:
+      rabbitmq:
+        image: rabbitmq:3.13-management
+        env:
+          RABBITMQ_DEFAULT_USER: guest
+          RABBITMQ_DEFAULT_PASS: guest
+        ports:
+          - 5672:5672
+          - 15672:15672
+        options: >-
+          --health-cmd="rabbitmq-diagnostics -q ping"
+          --health-interval=30s
+          --health-timeout=10s
+          --health-retries=5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: ${{ env.SERVICE_PATH }}/package-lock.json
+
+    - name: Install dependencies
+      run: |
+        cd ${{ env.SERVICE_PATH }}
+        npm ci
+
+    - name: Run ESLint
+      run: |
+        cd ${{ env.SERVICE_PATH }}
+        npm run lint
+
+    - name: Run Prettier Check
+      run: |
+        cd ${{ env.SERVICE_PATH }}
+        npm run format
+
+    - name: Run Unit Tests
+      run: |
+        cd ${{ env.SERVICE_PATH }}
+        npm run test:cov
+      env:
+        NODE_ENV: test
+        RABBITMQ_URL: amqp://guest:guest@localhost:5672
+        JWT_SECRET: test-secret-key-for-jwt-token-generation
+        JWT_REFRESH_SECRET: test-refresh-secret-key-for-jwt-refresh-token
+        PORT: ${{ env.PORT }}
+
+    - name: Run Integration Tests
+      run: |
+        cd ${{ env.SERVICE_PATH }}
+        npm run test:integration
+      env:
+        NODE_ENV: test
+        RABBITMQ_URL: amqp://guest:guest@localhost:5672
+        JWT_SECRET: test-secret-key-for-jwt-token-generation
+        JWT_REFRESH_SECRET: test-refresh-secret-key-for-jwt-refresh-token
+        PORT: ${{ env.PORT }}
+
+    - name: Build Application
+      run: |
+        cd ${{ env.SERVICE_PATH }}
+        npm run build
+
+    - name: Upload Coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        file: ${{ env.SERVICE_PATH }}/coverage/lcov.info
+        name: ${{ env.SERVICE_NAME }}-coverage
+        fail_ci_if_error: false
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Dependency Check
+      uses: dependency-check/Dependency-Check_Action@main
+      with:
+        project: ${{ env.SERVICE_NAME }}
+        path: ${{ env.SERVICE_PATH }}
+        format: 'JSON'
+        args: >
+          --enableRetired
+          --enableExperimental
+          --out dependency-check-report
+
+    - name: Upload Dependency Check Results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: dependency-check-results
+        path: dependency-check-report
+
+    - name: Run npm audit
+      run: |
+        cd ${{ env.SERVICE_PATH }}
+        npm audit --audit-level=high
+
+  docker-build:
+    name: Docker Build & Push
+    runs-on: ubuntu-latest
+    needs: [test, security-scan]
+    if: github.event_name == 'push'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_HUB_USERNAME }}
+        password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.DOCKER_IMAGE }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ${{ env.SERVICE_PATH }}
+        file: ${{ env.SERVICE_PATH }}/Dockerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.DOCKER_IMAGE }}:latest
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: docker-build
+    if: github.ref == 'refs/heads/main'
+    environment: staging
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deploy to Staging
+      run: |
+        echo "Deploying ${{ env.SERVICE_NAME }} to staging..."
+        echo "Image: ${{ env.DOCKER_IMAGE }}:main-${{ github.sha }}"
+        echo "Port: ${{ env.PORT }}"
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main'
+    environment: 
+      name: production
+      url: https://api.mediq.id:8601
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deploy to Production
+      run: |
+        echo "Deploying ${{ env.SERVICE_NAME }} to production..."
+        echo "Image: ${{ env.DOCKER_IMAGE }}:main-${{ github.sha }}"
+        echo "Port: ${{ env.PORT }}"
+
+    - name: Health Check
+      run: |
+        echo "Running health check for ${{ env.SERVICE_NAME }}..."
+        curl -f https://api.mediq.id:8601/api/health || exit 1

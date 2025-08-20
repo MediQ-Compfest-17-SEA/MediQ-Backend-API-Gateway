@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  api-gateway:
+    build: .
+    ports:
+      - "8601:8601"
+    environment:
+      - NODE_ENV=development
+      - PORT=8601
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - USER_SERVICE_URL=http://user-service:8602
+      - OCR_SERVICE_URL=http://ocr-service:8603
+      - PATIENT_QUEUE_SERVICE_URL=http://patient-queue-service:8605
+      - CIRCUIT_BREAKER_TIMEOUT=5000
+      - CIRCUIT_BREAKER_THRESHOLD=5
+      - RATE_LIMIT_TTL=60
+      - RATE_LIMIT_LIMIT=100
+    depends_on:
+      - rabbitmq
+    networks:
+      - mediq-network
+    healthcheck:
+      test: ["CMD", "node", "dist/health-check.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - mediq-network
+
+volumes:
+  rabbitmq_data:
+
+networks:
+  mediq-network:
+    driver: bridge

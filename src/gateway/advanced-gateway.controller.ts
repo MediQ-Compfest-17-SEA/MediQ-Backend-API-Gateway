@@ -69,12 +69,12 @@ export class AdvancedGatewayController {
       await this.eventStore.appendEvent({
         aggregateId: `user_registration_${userData.email}`,
         eventType: 'USER_REGISTRATION_INITIATED',
-        eventData: {
+        data: {
           sagaId,
           email: userData.email,
           idempotencyKey,
         },
-        version: 1,
+        metadata: { version: 1 },
       });
 
       return {
@@ -90,12 +90,12 @@ export class AdvancedGatewayController {
       await this.eventStore.appendEvent({
         aggregateId: `user_registration_${userData.email}`,
         eventType: 'USER_REGISTRATION_FAILED',
-        eventData: {
+        data: {
           email: userData.email,
           error: error.message,
           idempotencyKey,
         },
-        version: 1,
+        metadata: { version: 1 },
       });
 
       throw error;
@@ -128,13 +128,13 @@ export class AdvancedGatewayController {
       await this.eventStore.appendEvent({
         aggregateId: `patient_creation_${patientData.phone}`,
         eventType: 'PATIENT_CREATION_INITIATED',
-        eventData: {
+        data: {
           sagaId,
           patientName: patientData.name,
           phone: patientData.phone,
           idempotencyKey,
         },
-        version: 1,
+        metadata: { version: 1 },
       });
 
       return {
@@ -150,13 +150,13 @@ export class AdvancedGatewayController {
       await this.eventStore.appendEvent({
         aggregateId: `patient_creation_${patientData.phone}`,
         eventType: 'PATIENT_CREATION_FAILED',
-        eventData: {
+        data: {
           patientName: patientData.name,
           phone: patientData.phone,
           error: error.message,
           idempotencyKey,
         },
-        version: 1,
+        metadata: { version: 1 },
       });
 
       throw error;
@@ -187,14 +187,14 @@ export class AdvancedGatewayController {
       await this.eventStore.appendEvent({
         aggregateId: `patient_transfer_${transferData.patientId}`,
         eventType: 'PATIENT_TRANSFER_INITIATED',
-        eventData: {
+        data: {
           sagaId,
           patientId: transferData.patientId,
           fromQueueId: transferData.fromQueueId,
           toQueueId: transferData.toQueueId,
           idempotencyKey,
         },
-        version: 1,
+        metadata: { version: 1 },
       });
 
       return {
@@ -210,14 +210,14 @@ export class AdvancedGatewayController {
       await this.eventStore.appendEvent({
         aggregateId: `patient_transfer_${transferData.patientId}`,
         eventType: 'PATIENT_TRANSFER_FAILED',
-        eventData: {
+        data: {
           patientId: transferData.patientId,
           fromQueueId: transferData.fromQueueId,
           toQueueId: transferData.toQueueId,
           error: error.message,
           idempotencyKey,
         },
-        version: 1,
+        metadata: { version: 1 },
       });
 
       throw error;
@@ -243,15 +243,10 @@ export class AdvancedGatewayController {
         this.logger.log('Secure operation completed successfully');
         return result;
       },
-      async () => {
-        // Fallback operation
-        this.logger.warn('Circuit breaker open, using fallback');
-        return {
-          message: 'Service temporarily unavailable, using cached data',
-          data: null,
-          fallback: true,
-          timestamp: new Date(),
-        };
+      {
+        failureThreshold: 5,
+        recoveryTimeout: 30000,
+        timeout: 10000,
       },
     );
   }
@@ -280,12 +275,12 @@ export class AdvancedGatewayController {
       await this.eventStore.appendEvent({
         aggregateId: `operation_${transactionId}`,
         eventType: 'OPERATION_COMPLETED',
-        eventData: {
+        data: {
           transactionId,
           result,
           compensationPlan,
         },
-        version: 1,
+        metadata: { version: 1 },
       });
 
       this.logger.log(`Operation completed successfully: ${transactionId}`);
@@ -300,12 +295,12 @@ export class AdvancedGatewayController {
       await this.eventStore.appendEvent({
         aggregateId: `operation_${transactionId}`,
         eventType: 'OPERATION_COMPENSATED',
-        eventData: {
+        data: {
           transactionId,
           error: error.message,
           compensationResults,
         },
-        version: 2,
+        metadata: { version: 2 },
       });
 
       throw error;
@@ -331,20 +326,10 @@ export class AdvancedGatewayController {
               .send('create_patient', patientData)
               .toPromise();
           },
-          async () => {
-            // Fallback: queue for later processing
-            await this.eventStore.appendEvent({
-              aggregateId: `bulk_operation_${Date.now()}`,
-              eventType: 'PATIENT_QUEUED_FOR_LATER',
-              eventData: {
-                patientData,
-                index,
-                reason: 'Circuit breaker fallback',
-              },
-              version: index + 1,
-            });
-
-            return { queued: true, index };
+          {
+            failureThreshold: 3,
+            recoveryTimeout: 15000,
+            timeout: 5000,
           },
         );
 
@@ -368,8 +353,8 @@ export class AdvancedGatewayController {
     await this.eventStore.appendEvent({
       aggregateId: `bulk_operation_${Date.now()}`,
       eventType: 'BULK_PATIENT_CREATION_COMPLETED',
-      eventData: summary,
-      version: 1,
+      data: summary,
+      metadata: { version: 1 },
     });
 
     return summary;

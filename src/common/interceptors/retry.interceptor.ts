@@ -164,7 +164,7 @@ export class RetryInterceptor implements NestInterceptor {
       await this.eventStore.appendEvent({
         aggregateId: `retry_${requestId}`,
         eventType: 'RETRY_ATTEMPT',
-        eventData: {
+        data: {
           retryKey,
           attempt: attempt.attempt,
           delay: attempt.delay,
@@ -174,7 +174,7 @@ export class RetryInterceptor implements NestInterceptor {
             status: attempt.error.status,
           },
         },
-        version: attempt.attempt,
+        metadata: { version: attempt.attempt },
       });
     } catch (error) {
       this.logger.error(`Failed to log retry attempt: ${error.message}`);
@@ -190,11 +190,11 @@ export class RetryInterceptor implements NestInterceptor {
       await this.eventStore.appendEvent({
         aggregateId: `retry_${requestId}`,
         eventType: 'RETRY_COMPLETED',
-        eventData: {
+        data: {
           retryKey,
           totalAttempts,
         },
-        version: totalAttempts + 1,
+        metadata: { version: totalAttempts + 1 },
       });
     } catch (error) {
       this.logger.error(`Failed to log retry result: ${error.message}`);

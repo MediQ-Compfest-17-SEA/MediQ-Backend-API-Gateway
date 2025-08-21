@@ -25,7 +25,7 @@ interface RequestMetrics {
   memoryUsage?: NodeJS.MemoryUsage;
 }
 
-interface PerformanceMetrics {
+export interface PerformanceMetrics {
   endpoint: string;
   method: string;
   count: number;
@@ -155,11 +155,11 @@ export class MetricsInterceptor implements NestInterceptor {
       await this.eventStore.appendEvent({
         aggregateId: `metrics_${metrics.requestId}`,
         eventType: 'REQUEST_METRICS',
-        eventData: {
+        data: {
           ...metrics,
           timestamp: new Date(),
         },
-        version: 1,
+        metadata: { version: 1 },
       });
     } catch (error) {
       this.logger.error(`Failed to log request metrics: ${error.message}`);

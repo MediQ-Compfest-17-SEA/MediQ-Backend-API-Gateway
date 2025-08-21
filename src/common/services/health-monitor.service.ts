@@ -74,9 +74,10 @@ export class HealthMonitorService {
         async () => {
           return await client.send('health_check', {}).toPromise();
         },
-        async () => {
-          // Fallback for health check
-          return { status: 'DOWN', message: 'Circuit breaker open' };
+        {
+          failureThreshold: 5,
+          recoveryTimeout: 30000,
+          timeout: 5000,
         },
       );
 
@@ -230,13 +231,13 @@ export class HealthMonitorService {
     await this.eventStore.appendEvent({
       aggregateId: `health_${serviceName}`,
       eventType: 'HEALTH_STATUS_CHANGED',
-      eventData: {
+      data: {
         service: serviceName,
         fromStatus,
         toStatus,
         timestamp: new Date(),
       },
-      version: Date.now(),
+      metadata: { version: 1 },
     });
 
     this.logger.log(`Service ${serviceName} health changed from ${fromStatus} to ${toStatus}`);

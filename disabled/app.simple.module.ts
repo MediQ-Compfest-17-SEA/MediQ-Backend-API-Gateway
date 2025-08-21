@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { HealthController } from './health/health.controller';
+import { SimpleGatewayController } from './simple-gateway.controller';
 
 @Module({
   imports: [
@@ -33,7 +33,7 @@ import { HealthController } from './health/health.controller';
       },
     ]),
   ],
-  controllers: [HealthController],
+  controllers: [SimpleGatewayController],
   providers: [],
 })
 export class AppModule {}

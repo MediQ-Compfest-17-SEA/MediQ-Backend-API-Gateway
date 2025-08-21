@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SagaCoordinatorService, SagaDefinition, SagaStep } from '../services/saga-coordinator.service';
+import { SagaCoordinatorService, SagaDefinition, SagaStep, SagaStatus } from '../services/saga-coordinator.service';
 import { ClientProxy } from '@nestjs/microservices';
 
 export interface UserRegistrationSagaContext {
@@ -41,16 +41,19 @@ export class SagaPatternService {
     const sagaId = `user_registration_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     const sagaDefinition: SagaDefinition = {
-      sagaId,
+      id: sagaId,
+      name: 'user_registration_saga',
       steps: [
         this.createUserStep(userServiceClient),
         this.createUserProfileStep(userServiceClient),
         this.sendWelcomeNotificationStep(userServiceClient),
       ],
-      timeout: 300000, // 5 minutes
+      status: SagaStatus.STARTED,
+      startTime: new Date(),
     };
 
-    return await this.sagaCoordinator.executeSaga(sagaDefinition, context);
+    await this.sagaCoordinator.startSaga('user_registration_saga', sagaDefinition.steps);
+    return sagaId;
   }
 
   async executePatientQueueSaga(
@@ -59,18 +62,14 @@ export class SagaPatternService {
   ): Promise<string> {
     const sagaId = `patient_queue_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    const sagaDefinition: SagaDefinition = {
-      sagaId,
-      steps: [
-        this.validatePatientDataStep(),
-        this.createPatientStep(patientQueueServiceClient),
-        this.addToQueueStep(patientQueueServiceClient),
-        this.sendQueueNotificationStep(patientQueueServiceClient),
-      ],
-      timeout: 180000, // 3 minutes
-    };
+    const sagaSteps = [
+      this.validatePatientDataStep(),
+      this.createPatientStep(patientQueueServiceClient),
+      this.addToQueueStep(patientQueueServiceClient),
+      this.sendQueueNotificationStep(patientQueueServiceClient),
+    ];
 
-    return await this.sagaCoordinator.executeSaga(sagaDefinition, context);
+    return await this.sagaCoordinator.startSaga('patient_queue_saga', sagaSteps);
   }
 
   async executeComplexPatientTransferSaga(
@@ -89,23 +88,22 @@ export class SagaPatternService {
       newPosition: null,
     };
 
-    const sagaDefinition: SagaDefinition = {
-      sagaId,
-      steps: [
-        this.validateTransferStep(patientQueueServiceClient),
-        this.removeFromSourceQueueStep(patientQueueServiceClient),
-        this.addToDestinationQueueStep(patientQueueServiceClient),
-        this.notifyQueueChangesStep(patientQueueServiceClient),
-      ],
-      timeout: 120000, // 2 minutes
-    };
+    const sagaSteps = [
+      this.validateTransferStep(patientQueueServiceClient),
+      this.removeFromSourceQueueStep(patientQueueServiceClient),
+      this.addToDestinationQueueStep(patientQueueServiceClient),
+      this.notifyQueueChangesStep(patientQueueServiceClient),
+    ];
 
-    return await this.sagaCoordinator.executeSaga(sagaDefinition, context);
+    return await this.sagaCoordinator.startSaga('patient_transfer_saga', sagaSteps);
   }
 
   private createUserStep(userServiceClient: ClientProxy): SagaStep {
     return {
-      stepId: 'create_user',
+      name: "step",
+      executed: false,
+      compensated: false,
+      id: 'create_user',
       action: async () => {
         this.logger.log('Saga: Creating user');
         
@@ -122,9 +120,12 @@ export class SagaPatternService {
           throw new Error('Failed to create user');
         }
 
-        return { userId: result.id };
+        return {
+      name: "step",
+      executed: false,
+      compensated: false, userId: result.id };
       },
-      compensation: async () => {
+      compensationAction: async () => {
         this.logger.log('Saga: Compensating user creation');
         
         // Delete the created user
@@ -132,13 +133,16 @@ export class SagaPatternService {
           .send('delete_user', { userId: 'context.userId' })
           .toPromise();
       },
-      timeout: 30000,
+
     };
   }
 
   private createUserProfileStep(userServiceClient: ClientProxy): SagaStep {
     return {
-      stepId: 'create_user_profile',
+      name: "step",
+      executed: false,
+      compensated: false,
+      id: 'create_user_profile',
       action: async () => {
         this.logger.log('Saga: Creating user profile');
         
@@ -153,22 +157,28 @@ export class SagaPatternService {
           throw new Error('Failed to create user profile');
         }
 
-        return { profileId: result.id };
+        return {
+      name: "step",
+      executed: false,
+      compensated: false, profileId: result.id };
       },
-      compensation: async () => {
+      compensationAction: async () => {
         this.logger.log('Saga: Compensating user profile creation');
         
         await userServiceClient
           .send('delete_user_profile', { profileId: 'context.profileId' })
           .toPromise();
       },
-      timeout: 20000,
+
     };
   }
 
   private sendWelcomeNotificationStep(userServiceClient: ClientProxy): SagaStep {
     return {
-      stepId: 'send_welcome_notification',
+      name: "step",
+      executed: false,
+      compensated: false,
+      id: 'send_welcome_notification',
       action: async () => {
         this.logger.log('Saga: Sending welcome notification');
         
@@ -180,9 +190,12 @@ export class SagaPatternService {
           })
           .toPromise();
 
-        return { notificationsSent: true };
+        return {
+      name: "step",
+      executed: false,
+      compensated: false, notificationsSent: true };
       },
-      compensation: async () => {
+      compensationAction: async () => {
         this.logger.log('Saga: Compensating welcome notification');
         // Usually notifications can't be "unsent", but we can mark them as cancelled
         
@@ -193,13 +206,16 @@ export class SagaPatternService {
           })
           .toPromise();
       },
-      timeout: 15000,
+
     };
   }
 
   private validatePatientDataStep(): SagaStep {
     return {
-      stepId: 'validate_patient_data',
+      name: "step",
+      executed: false,
+      compensated: false,
+      id: 'validate_patient_data',
       action: async () => {
         this.logger.log('Saga: Validating patient data');
         
@@ -211,9 +227,12 @@ export class SagaPatternService {
           throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
         }
 
-        return { validated: true };
+        return {
+      name: "step",
+      executed: false,
+      compensated: false, validated: true };
       },
-      compensation: async () => {
+      compensationAction: async () => {
         this.logger.log('Saga: No compensation needed for validation');
         // Validation doesn't need compensation
       },
@@ -222,7 +241,10 @@ export class SagaPatternService {
 
   private createPatientStep(patientQueueServiceClient: ClientProxy): SagaStep {
     return {
-      stepId: 'create_patient',
+      name: "step",
+      executed: false,
+      compensated: false,
+      id: 'create_patient',
       action: async () => {
         this.logger.log('Saga: Creating patient');
         
@@ -234,22 +256,28 @@ export class SagaPatternService {
           throw new Error('Failed to create patient');
         }
 
-        return { patientId: result.id };
+        return {
+      name: "step",
+      executed: false,
+      compensated: false, patientId: result.id };
       },
-      compensation: async () => {
+      compensationAction: async () => {
         this.logger.log('Saga: Compensating patient creation');
         
         await patientQueueServiceClient
           .send('delete_patient', { patientId: 'context.patientId' })
           .toPromise();
       },
-      timeout: 25000,
+
     };
   }
 
   private addToQueueStep(patientQueueServiceClient: ClientProxy): SagaStep {
     return {
-      stepId: 'add_to_queue',
+      name: "step",
+      executed: false,
+      compensated: false,
+      id: 'add_to_queue',
       action: async () => {
         this.logger.log('Saga: Adding patient to queue');
         
@@ -260,22 +288,28 @@ export class SagaPatternService {
           })
           .toPromise();
 
-        return { queuePosition: result.position };
+        return {
+      name: "step",
+      executed: false,
+      compensated: false, queuePosition: result.position };
       },
-      compensation: async () => {
+      compensationAction: async () => {
         this.logger.log('Saga: Compensating queue addition');
         
         await patientQueueServiceClient
           .send('remove_from_queue', { patientId: 'context.patientId' })
           .toPromise();
       },
-      timeout: 20000,
+
     };
   }
 
   private sendQueueNotificationStep(patientQueueServiceClient: ClientProxy): SagaStep {
     return {
-      stepId: 'send_queue_notification',
+      name: "step",
+      executed: false,
+      compensated: false,
+      id: 'send_queue_notification',
       action: async () => {
         this.logger.log('Saga: Sending queue notification');
         
@@ -287,9 +321,12 @@ export class SagaPatternService {
           })
           .toPromise();
 
-        return { notificationsSent: true };
+        return {
+      name: "step",
+      executed: false,
+      compensated: false, notificationsSent: true };
       },
-      compensation: async () => {
+      compensationAction: async () => {
         this.logger.log('Saga: Compensating queue notification');
         
         await patientQueueServiceClient
@@ -298,13 +335,16 @@ export class SagaPatternService {
           })
           .toPromise();
       },
-      timeout: 15000,
+
     };
   }
 
   private validateTransferStep(patientQueueServiceClient: ClientProxy): SagaStep {
     return {
-      stepId: 'validate_transfer',
+      name: "step",
+      executed: false,
+      compensated: false,
+      id: 'validate_transfer',
       action: async () => {
         this.logger.log('Saga: Validating patient transfer');
         
@@ -320,9 +360,12 @@ export class SagaPatternService {
           throw new Error('Transfer validation failed: ' + result.reason);
         }
 
-        return { validated: true, originalPosition: result.originalPosition };
+        return {
+      name: "step",
+      executed: false,
+      compensated: false, validated: true, originalPosition: result.originalPosition };
       },
-      compensation: async () => {
+      compensationAction: async () => {
         this.logger.log('Saga: No compensation needed for transfer validation');
       },
     };
@@ -330,7 +373,10 @@ export class SagaPatternService {
 
   private removeFromSourceQueueStep(patientQueueServiceClient: ClientProxy): SagaStep {
     return {
-      stepId: 'remove_from_source_queue',
+      name: "step",
+      executed: false,
+      compensated: false,
+      id: 'remove_from_source_queue',
       action: async () => {
         this.logger.log('Saga: Removing patient from source queue');
         
@@ -341,9 +387,12 @@ export class SagaPatternService {
           })
           .toPromise();
 
-        return { removedFromSource: true };
+        return {
+      name: "step",
+      executed: false,
+      compensated: false, removedFromSource: true };
       },
-      compensation: async () => {
+      compensationAction: async () => {
         this.logger.log('Saga: Compensating source queue removal');
         
         await patientQueueServiceClient
@@ -359,7 +408,10 @@ export class SagaPatternService {
 
   private addToDestinationQueueStep(patientQueueServiceClient: ClientProxy): SagaStep {
     return {
-      stepId: 'add_to_destination_queue',
+      name: "step",
+      executed: false,
+      compensated: false,
+      id: 'add_to_destination_queue',
       action: async () => {
         this.logger.log('Saga: Adding patient to destination queue');
         
@@ -370,9 +422,12 @@ export class SagaPatternService {
           })
           .toPromise();
 
-        return { newPosition: result.position };
+        return {
+      name: "step",
+      executed: false,
+      compensated: false, newPosition: result.position };
       },
-      compensation: async () => {
+      compensationAction: async () => {
         this.logger.log('Saga: Compensating destination queue addition');
         
         await patientQueueServiceClient
@@ -387,7 +442,10 @@ export class SagaPatternService {
 
   private notifyQueueChangesStep(patientQueueServiceClient: ClientProxy): SagaStep {
     return {
-      stepId: 'notify_queue_changes',
+      name: "step",
+      executed: false,
+      compensated: false,
+      id: 'notify_queue_changes',
       action: async () => {
         this.logger.log('Saga: Notifying queue changes');
         
@@ -400,9 +458,12 @@ export class SagaPatternService {
           })
           .toPromise();
 
-        return { notificationsSent: true };
+        return {
+      name: "step",
+      executed: false,
+      compensated: false, notificationsSent: true };
       },
-      compensation: async () => {
+      compensationAction: async () => {
         this.logger.log('Saga: Compensating queue change notifications');
         
         await patientQueueServiceClient

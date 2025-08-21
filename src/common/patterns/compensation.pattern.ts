@@ -98,12 +98,12 @@ export class CompensationPatternService {
     await this.eventStore.appendEvent({
       aggregateId: `compensation_${planId}`,
       eventType: 'COMPENSATION_STARTED',
-      eventData: {
+      data: {
         planId,
         transactionId: plan.transactionId,
         actionsCount: plan.actions.length,
       },
-      version: 1,
+      metadata: { version: 1 },
     });
 
     this.logger.log(`Starting compensation for plan ${planId}`);
@@ -119,12 +119,12 @@ export class CompensationPatternService {
       await this.eventStore.appendEvent({
         aggregateId: `compensation_${planId}`,
         eventType: 'COMPENSATION_ACTION_COMPLETED',
-        eventData: {
+        data: {
           actionId: action.actionId,
           success: result.success,
           error: result.error,
         },
-        version: plan.actions.length - i + 1,
+        metadata: { version: plan.actions.length - i + 1 },
       });
     }
 
@@ -143,7 +143,7 @@ export class CompensationPatternService {
     await this.eventStore.appendEvent({
       aggregateId: `compensation_${planId}`,
       eventType: 'COMPENSATION_FINISHED',
-      eventData: {
+      data: {
         planId,
         status: plan.status,
         results: results.map(r => ({
@@ -152,7 +152,7 @@ export class CompensationPatternService {
           error: r.error,
         })),
       },
-      version: plan.actions.length + 2,
+      metadata: { version: plan.actions.length + 2 },
     });
 
     this.logger.log(`Compensation plan ${planId} completed with status: ${plan.status}`);
@@ -334,7 +334,7 @@ export class CompensationPatternService {
   }
 
   async getCompensationHistory(planId: string): Promise<any[]> {
-    const events = await this.eventStore.getEvents(`compensation_${planId}`);
+    const events = await this.eventStore.getEvents({ aggregateId: `compensation_${planId}` });
     return events.filter(event => event.eventType.startsWith('COMPENSATION_'));
   }
 

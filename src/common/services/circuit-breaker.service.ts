@@ -9,8 +9,9 @@ export enum CircuitState {
 export interface CircuitBreakerConfig {
   failureThreshold: number;
   recoveryTimeout: number;
-  monitorTimeout: number;
-  name: string;
+  monitorTimeout?: number;
+  timeout?: number;
+  name?: string;
 }
 
 @Injectable()
@@ -70,6 +71,32 @@ export class CircuitBreakerService {
 
   getCircuitState(serviceName: string): CircuitState {
     return this.circuits.get(serviceName)?.state || CircuitState.CLOSED;
+  }
+
+  getAllCircuitsStats(): any {
+    const stats: any = {};
+    for (const [name, circuit] of this.circuits.entries()) {
+      stats[name] = {
+        state: circuit.state,
+        failureCount: circuit.failureCount,
+        lastFailureTime: circuit.lastFailureTime,
+        config: circuit.config,
+      };
+    }
+    return stats;
+  }
+
+  getCircuitStats(serviceName: string): any {
+    const circuit = this.circuits.get(serviceName);
+    if (!circuit) {
+      return null;
+    }
+    return {
+      state: circuit.state,
+      failureCount: circuit.failureCount,
+      lastFailureTime: circuit.lastFailureTime,
+      config: circuit.config,
+    };
   }
 
   resetCircuit(serviceName: string): void {

@@ -58,6 +58,16 @@ export class EventStoreService {
     this.logger.debug(`Event saved: ${eventType} for aggregate ${aggregateId}`);
   }
 
+  // Alias for saveEvent for compatibility
+  async appendEvent(event: { aggregateId: string; eventType: string; data: any; metadata?: Partial<Event['metadata']> }): Promise<void> {
+    return this.saveEvent(event.aggregateId, event.eventType, event.data, event.metadata);
+  }
+
+  // Get all events (alias for getEvents)
+  async getAllEvents(filter: EventFilter = {}): Promise<Event[]> {
+    return this.getEvents(filter);
+  }
+
   async getEvents(filter: EventFilter = {}): Promise<Event[]> {
     let filteredEvents = this.events;
 
@@ -137,5 +147,24 @@ export class EventStoreService {
       JSON.stringify(event.data).toLowerCase().includes(query.toLowerCase()) ||
       event.eventType.toLowerCase().includes(query.toLowerCase())
     );
+  }
+
+  async cleanupOldEvents(olderThanDays: number = 30): Promise<void> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
+
+    const initialCount = this.events.length;
+    this.events = this.events.filter(event => event.metadata.timestamp > cutoffDate);
+
+    // Rebuild eventsByAggregate map
+    this.eventsByAggregate.clear();
+    for (const event of this.events) {
+      if (!this.eventsByAggregate.has(event.aggregateId)) {
+        this.eventsByAggregate.set(event.aggregateId, []);
+      }
+      this.eventsByAggregate.get(event.aggregateId)!.push(event);
+    }
+
+    this.logger.log(`Cleaned up ${initialCount - this.events.length} old events`);
   }
 }

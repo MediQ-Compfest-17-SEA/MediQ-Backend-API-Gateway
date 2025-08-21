@@ -82,12 +82,12 @@ export class MonitoringController {
   @ApiOperation({ summary: 'Get saga status and history' })
   @ApiParam({ name: 'sagaId', description: 'ID of the saga' })
   @ApiResponse({ status: 200, description: 'Saga status and history' })
-  async getSagaDetails(@Param('sagaId') sagaId: string) {
-    const status = this.sagaCoordinator.getSagaStatus(sagaId);
-    const history = await this.sagaCoordinator.getSagaHistory(sagaId);
+  async getSagaDetails(@Param('sagaId') id: string) {
+    const status = this.sagaCoordinator.getSagaStatus(id);
+    const history = await this.sagaCoordinator.getSagaHistory(id);
     
     return {
-      sagaId,
+      sagaId: id,
       status,
       history,
       timestamp: new Date(),
@@ -155,7 +155,7 @@ export class MonitoringController {
     
     const events = await this.eventStore.getAllEvents(filter);
     const recentEvents = events
-      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+      .sort((a, b) => b.metadata.timestamp.getTime() - a.metadata.timestamp.getTime())
       .slice(0, limitNum);
     
     return {
@@ -174,8 +174,8 @@ export class MonitoringController {
     @Param('aggregateId') aggregateId: string,
     @Query('eventType') eventType?: string,
   ) {
-    const filter = eventType ? { eventType } : undefined;
-    const events = await this.eventStore.getEvents(aggregateId, filter);
+    const filter = eventType ? { aggregateId, eventType } : { aggregateId };
+    const events = await this.eventStore.getEvents(filter);
     
     return {
       aggregateId,

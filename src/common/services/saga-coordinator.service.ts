@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 export enum SagaStatus {
   STARTED = 'STARTED',
+  RUNNING = 'RUNNING',
   IN_PROGRESS = 'IN_PROGRESS',
   COMPENSATING = 'COMPENSATING',
   COMPLETED = 'COMPLETED',
@@ -40,9 +41,9 @@ export class SagaCoordinatorService {
   constructor(private readonly eventStore: EventStoreService) {}
 
   async startSaga(name: string, steps: Omit<SagaStep, 'id' | 'executed' | 'compensated'>[], metadata?: any): Promise<string> {
-    const sagaId = uuidv4();
+    const id = uuidv4();
     const saga: SagaDefinition = {
-      id: sagaId,
+      id: id,
       name,
       steps: steps.map(step => ({
         ...step,
@@ -55,42 +56,42 @@ export class SagaCoordinatorService {
       metadata,
     };
 
-    this.sagas.set(sagaId, saga);
+    this.sagas.set(id, saga);
 
-    await this.eventStore.saveEvent(sagaId, 'SagaStarted', {
+    await this.eventStore.saveEvent(id, 'SagaStarted', {
       name,
       steps: saga.steps.map(s => ({ id: s.id, name: s.name })),
       metadata,
     });
 
-    this.logger.log(`Saga ${name} started with ID: ${sagaId}`);
+    this.logger.log(`Saga ${name} started with ID: ${id}`);
     
     // Execute saga asynchronously
-    this.executeSaga(sagaId).catch(error => {
-      this.logger.error(`Saga ${sagaId} failed: ${error.message}`, error.stack);
+    this.executeSaga(id).catch(error => {
+      this.logger.error(`Saga ${id} failed: ${error.message}`, error.stack);
     });
 
-    return sagaId;
+    return id;
   }
 
-  private async executeSaga(sagaId: string): Promise<void> {
-    const saga = this.sagas.get(sagaId);
+  private async executeSaga(id: string): Promise<void> {
+    const saga = this.sagas.get(id);
     if (!saga) {
-      throw new Error(`Saga ${sagaId} not found`);
+      throw new Error(`Saga ${id} not found`);
     }
 
     saga.status = SagaStatus.IN_PROGRESS;
 
     try {
       for (const step of saga.steps) {
-        this.logger.debug(`Executing step: ${step.name} in saga ${sagaId}`);
+        this.logger.debug(`Executing step: ${step.name} in saga ${id}`);
         
         try {
           step.result = await step.action();
           step.executed = true;
 
-          await this.eventStore.saveEvent(sagaId, 'StepCompleted', {
-            stepId: step.id,
+          await this.eventStore.saveEvent(id, 'StepCompleted', {
+            id: step.id,
             stepName: step.name,
             result: step.result,
           });
@@ -99,8 +100,8 @@ export class SagaCoordinatorService {
         } catch (error) {
           step.error = error as Error;
           
-          await this.eventStore.saveEvent(sagaId, 'StepFailed', {
-            stepId: step.id,
+          await this.eventStore.saveEvent(id, 'StepFailed', {
+            id: step.id,
             stepName: step.name,
             error: error.message,
           });
@@ -113,30 +114,30 @@ export class SagaCoordinatorService {
       saga.status = SagaStatus.COMPLETED;
       saga.endTime = new Date();
 
-      await this.eventStore.saveEvent(sagaId, 'SagaCompleted', {
+      await this.eventStore.saveEvent(id, 'SagaCompleted', {
         duration: saga.endTime.getTime() - saga.startTime.getTime(),
       });
 
-      this.logger.log(`Saga ${sagaId} completed successfully`);
+      this.logger.log(`Saga ${id} completed successfully`);
     } catch (error) {
       saga.status = SagaStatus.COMPENSATING;
       
-      await this.eventStore.saveEvent(sagaId, 'SagaFailed', {
+      await this.eventStore.saveEvent(id, 'SagaFailed', {
         error: error.message,
         failedStep: saga.steps.find(s => s.error)?.name,
       });
 
-      await this.compensateSaga(sagaId);
+      await this.compensateSaga(id);
     }
   }
 
-  private async compensateSaga(sagaId: string): Promise<void> {
-    const saga = this.sagas.get(sagaId);
+  private async compensateSaga(id: string): Promise<void> {
+    const saga = this.sagas.get(id);
     if (!saga) {
-      throw new Error(`Saga ${sagaId} not found`);
+      throw new Error(`Saga ${id} not found`);
     }
 
-    this.logger.warn(`Starting compensation for saga ${sagaId}`);
+    this.logger.warn(`Starting compensation for saga ${id}`);
 
     // Execute compensation actions in reverse order
     const executedSteps = saga.steps.filter(step => step.executed).reverse();
@@ -148,8 +149,8 @@ export class SagaCoordinatorService {
         await step.compensationAction();
         step.compensated = true;
 
-        await this.eventStore.saveEvent(sagaId, 'StepCompensated', {
-          stepId: step.id,
+        await this.eventStore.saveEvent(id, 'StepCompensated', {
+          id: step.id,
           stepName: step.name,
         });
 
@@ -157,8 +158,8 @@ export class SagaCoordinatorService {
       } catch (error) {
         this.logger.error(`Compensation failed for step ${step.name}: ${error.message}`);
         
-        await this.eventStore.saveEvent(sagaId, 'CompensationFailed', {
-          stepId: step.id,
+        await this.eventStore.saveEvent(id, 'CompensationFailed', {
+          id: step.id,
           stepName: step.name,
           error: error.message,
         });
@@ -168,15 +169,15 @@ export class SagaCoordinatorService {
     saga.status = SagaStatus.COMPENSATED;
     saga.endTime = new Date();
 
-    await this.eventStore.saveEvent(sagaId, 'SagaCompensated', {
+    await this.eventStore.saveEvent(id, 'SagaCompensated', {
       duration: saga.endTime.getTime() - saga.startTime.getTime(),
     });
 
-    this.logger.log(`Saga ${sagaId} compensation completed`);
+    this.logger.log(`Saga ${id} compensation completed`);
   }
 
-  async getSaga(sagaId: string): Promise<SagaDefinition | undefined> {
-    return this.sagas.get(sagaId);
+  async getSaga(id: string): Promise<SagaDefinition | undefined> {
+    return this.sagas.get(id);
   }
 
   async getAllSagas(): Promise<SagaDefinition[]> {
@@ -187,10 +188,32 @@ export class SagaCoordinatorService {
     return Array.from(this.sagas.values()).filter(saga => saga.status === status);
   }
 
-  async retrySaga(sagaId: string): Promise<void> {
-    const saga = this.sagas.get(sagaId);
+  getActiveSagas(): SagaDefinition[] {
+    return Array.from(this.sagas.values()).filter(saga => saga.status === SagaStatus.RUNNING);
+  }
+
+  getSagaStatus(id: string): SagaDefinition | null {
+    return this.sagas.get(id) || null;
+  }
+
+  async getSagaHistory(id: string): Promise<any[]> {
+    const saga = this.sagas.get(id);
     if (!saga) {
-      throw new Error(`Saga ${sagaId} not found`);
+      return [];
+    }
+    
+    return saga.steps.map((step, index) => ({
+      id: `step-${index}`,
+      status: step.executed ? 'completed' : 'pending',
+      executedAt: step.executed ? new Date() : null,
+      error: step.error,
+    }));
+  }
+
+  async retrySaga(id: string): Promise<void> {
+    const saga = this.sagas.get(id);
+    if (!saga) {
+      throw new Error(`Saga ${id} not found`);
     }
 
     if (saga.status !== SagaStatus.FAILED && saga.status !== SagaStatus.COMPENSATED) {
@@ -209,9 +232,9 @@ export class SagaCoordinatorService {
     saga.startTime = new Date();
     saga.endTime = undefined;
 
-    await this.eventStore.saveEvent(sagaId, 'SagaRetried', {});
+    await this.eventStore.saveEvent(id, 'SagaRetried', {});
 
-    this.logger.log(`Retrying saga ${sagaId}`);
-    await this.executeSaga(sagaId);
+    this.logger.log(`Retrying saga ${id}`);
+    await this.executeSaga(id);
   }
 }

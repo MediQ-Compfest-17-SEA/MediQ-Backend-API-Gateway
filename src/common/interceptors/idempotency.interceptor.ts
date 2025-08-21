@@ -20,6 +20,9 @@ interface IdempotentRequest {
   timestamp: Date;
   response?: any;
   statusCode?: number;
+  metadata: {
+    timestamp: Date;
+  };
 }
 
 @Injectable()
@@ -64,6 +67,9 @@ export class IdempotencyInterceptor implements NestInterceptor {
       body: request.body,
       headers: this.extractRelevantHeaders(request.headers),
       timestamp: new Date(),
+      metadata: {
+        timestamp: new Date(),
+      },
     };
 
     await this.storeIdempotentRequest(newRequest);
@@ -122,13 +128,14 @@ export class IdempotencyInterceptor implements NestInterceptor {
 
     // Check event store
     try {
-      const events = await this.eventStore.getEvents(`idempotent_${cacheKey}`, {
+      const events = await this.eventStore.getEvents({
+        aggregateId: `idempotent_${cacheKey}`,
         eventType: 'IDEMPOTENT_REQUEST_STORED',
       });
 
       if (events.length > 0) {
         const latestEvent = events[events.length - 1];
-        const request = latestEvent.eventData as IdempotentRequest;
+        const request = latestEvent.data as IdempotentRequest;
         
         if (this.isRequestValid(request)) {
           this.requestCache.set(cacheKey, request);
@@ -151,8 +158,8 @@ export class IdempotencyInterceptor implements NestInterceptor {
       await this.eventStore.appendEvent({
         aggregateId: `idempotent_${request.id}`,
         eventType: 'IDEMPOTENT_REQUEST_STORED',
-        eventData: request,
-        version: 1,
+        data: request,
+        metadata: { version: 1 },
       });
     } catch (error) {
       this.logger.error(`Failed to store idempotent request: ${error.message}`);
@@ -174,11 +181,11 @@ export class IdempotencyInterceptor implements NestInterceptor {
         await this.eventStore.appendEvent({
           aggregateId: `idempotent_${cacheKey}`,
           eventType: 'IDEMPOTENT_REQUEST_COMPLETED',
-          eventData: {
+          data: {
             response: data,
             statusCode,
           },
-          version: 2,
+          metadata: { version: 2 },
         });
       } catch (error) {
         this.logger.error(`Failed to update idempotent request response: ${error.message}`);
@@ -191,11 +198,11 @@ export class IdempotencyInterceptor implements NestInterceptor {
       await this.eventStore.appendEvent({
         aggregateId: `idempotent_${cacheKey}`,
         eventType: 'IDEMPOTENT_REQUEST_FAILED',
-        eventData: {
+        data: {
           error: error.message,
           statusCode: error.status || 500,
         },
-        version: 2,
+        metadata: { version: 2 },
       });
     } catch (err) {
       this.logger.error(`Failed to update idempotent request error: ${err.message}`);
@@ -238,7 +245,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
   }
 
   private isRequestValid(request: IdempotentRequest): boolean {
-    const age = Date.now() - new Date(request.timestamp).getTime();
+    const age = Date.now() - new Date(request.metadata.timestamp).getTime();
     return age < this.CACHE_TTL;
   }
 }

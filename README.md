@@ -150,7 +150,11 @@ POST /ocr/upload
 Content-Type: multipart/form-data
 
 Form Data:
-- file: [KTP image file]
+- file: [KTP image file] (atau gunakan field `image`)
+
+Auth Options:
+- Authorization: Bearer <JWT>
+- X-API-KEY: <PUBLIC_API_KEY> (untuk akses eksternal tanpa JWT)
 ```
 
 **Confirm OCR Data**

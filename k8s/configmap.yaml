@@ -41,6 +41,9 @@ data:
   # Swagger Configuration
   SWAGGER_ENABLED: "true"
   SWAGGER_PATH: "/api/docs"
+
+  # Public API Key for external access (set secret via Secret in prod)
+  PUBLIC_API_KEY: ""
   
   # CORS Configuration
   CORS_ENABLED: "true"

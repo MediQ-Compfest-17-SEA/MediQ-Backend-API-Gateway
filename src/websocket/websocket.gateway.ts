@@ -8,9 +8,10 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger, UseGuards } from '@nestjs/common';
+import { Logger, Inject, forwardRef } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { NotificationService } from '../notifications/notification.service';
+
 
 @WSGateway({
   cors: {
@@ -29,13 +30,9 @@ export class MediQWebSocketGateway implements OnGatewayConnection, OnGatewayDisc
 
   constructor(
     private readonly jwtService: JwtService,
+    @Inject(forwardRef(() => NotificationService))
     private readonly notificationService: NotificationService,
-  ) {
-    // Set up broadcast callback to avoid circular dependency
-    this.notificationService.setBroadcastCallback((userId, event, data) => {
-      this.sendNotification(userId, data);
-    });
-  }
+  ) {}
 
   async handleConnection(client: Socket) {
     try {

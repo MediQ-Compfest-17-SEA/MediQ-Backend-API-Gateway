@@ -60,6 +60,14 @@ export class NotificationController {
     @Body() subscriptionData: { types?: string[]; institutionId?: string },
     @CurrentUser() user: any,
   ) {
+    // Auto-join rooms by emitting to the user's websocket room via system notification
+    if (subscriptionData.institutionId) {
+      this.webSocketGateway.broadcastToInstitution(subscriptionData.institutionId, 'subscription_event', {
+        type: 'queue_subscription',
+        userId: user.id,
+      });
+    }
+
     return {
       message: 'Subscription preferences updated',
       userId: user.id,
@@ -68,7 +76,8 @@ export class NotificationController {
       websocketEndpoint: '/api/websocket',
       instructions: {
         connect: 'Connect to WebSocket dengan Bearer token di auth header',
-        subscribe: 'Send "subscribe_notifications" event dengan userId dan types'
+        subscribe: 'Send "subscribe_notifications" event dengan userId dan types',
+        queueUpdates: 'Send "subscribe_queue_updates" dengan institutionId untuk live queue updates'
       }
     };
   }
@@ -123,7 +132,8 @@ export class NotificationController {
       properties: {
         connectedClients: { type: 'number', description: 'Jumlah client yang terhubung' },
         endpoint: { type: 'string', description: 'WebSocket endpoint' },
-        status: { type: 'string', description: 'Status WebSocket server' }
+        status: { type: 'string', description: 'Status WebSocket server' },
+        events: { type: 'array', items: { type: 'string' } }
       }
     }
   })

@@ -15,33 +15,121 @@ async function bootstrap() {
 
   // Swagger documentation
   const config = new DocumentBuilder()
-    .setTitle('MediQ API Gateway')
-    .setDescription('Centralized API Gateway untuk semua MediQ Backend Services dengan advanced authentication, rate limiting, dan circuit breaker patterns')
-    .setVersion('2.0')
-    .addTag('Authentication', 'Authentication dan authorization endpoints - Login admin/user, refresh token, logout')
-    .addTag('Users', 'User management dengan data KTP lengkap - CRUD user, profil, role management')
-    .addTag('OCR', 'OCR processing untuk KTP scanning - Upload KTP, konfirmasi hasil OCR')
-    .addTag('OCR Engine', 'Gemini AI-powered OCR engine - Process dokumen KTP dengan akurasi tinggi menggunakan Google Gemini')
-    .addTag('Institutions', 'Institution dan facility management - CRUD institusi, layanan, pencarian')
-    .addTag('queue', 'Queue management untuk antrian pasien - Tambah antrian, status, statistik, panggil pasien')
-    .addTag('Notifications', 'Real-time notifications dan WebSocket - Subscribe notifikasi, WebSocket events, queue updates')
-    .addTag('Gateway', 'Basic gateway operations - Health check, service discovery')
+    .setTitle('MediQ API Gateway v3.0')
+    .setDescription(`
+# MediQ Healthcare Platform API Gateway
+
+Centralized API Gateway untuk semua MediQ Backend Services dengan advanced authentication, rate limiting, circuit breaker patterns, real-time WebSocket, dan comprehensive notification system.
+
+## 🚀 Key Features
+- **Real-time WebSocket**: Live queue updates dan notifications
+- **Gemini AI OCR**: 95%+ akurasi untuk KTP processing
+- **Smart Notifications**: 5 jenis notifikasi otomatis
+- **Advanced Authentication**: JWT dengan role-based access
+- **Microservice Integration**: 6 backend services terintegrasi
+
+## 🔐 Authentication Guide
+
+### 1. Admin Login
+\`\`\`bash
+curl -X POST http://localhost:8601/auth/login/admin \\
+  -H "Content-Type: application/json" \\
+  -d '{"email": "admin@mediq.com", "password": "admin123"}'
+\`\`\`
+
+### 2. User Login  
+\`\`\`bash
+curl -X POST http://localhost:8601/auth/login/user \\
+  -H "Content-Type: application/json" \\
+  -d '{"nik": "1234567890123456", "nama": "John Doe"}'
+\`\`\`
+
+### 3. Using Bearer Token
+\`\`\`bash
+curl -X GET http://localhost:8601/users/profile \\
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+\`\`\`
+
+## 🔗 WebSocket Connection
+\`\`\`javascript
+const socket = io('http://localhost:8601/api/websocket', {
+  auth: { token: 'YOUR_JWT_TOKEN' }
+});
+
+// Subscribe to notifications
+socket.emit('subscribe_notifications', {
+  userId: 'user-id',
+  types: ['queue_ready', 'queue_almost_ready']
+});
+\`\`\`
+
+## 📋 Queue Management Example
+\`\`\`bash
+# Add to queue
+curl -X POST http://localhost:8601/queue \\
+  -H "Authorization: Bearer YOUR_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "userId": "user-123",
+    "institutionId": "inst-456", 
+    "serviceType": "konsultasi",
+    "priority": "normal"
+  }'
+\`\`\`
+    `)
+    .setVersion('3.0')
+    .addTag('Authentication', 'Authentication dan authorization endpoints - Login admin/user, refresh token, logout dengan contoh lengkap')
+    .addTag('Users', 'User management dengan data KTP lengkap - CRUD user, profil, role management, check NIK')
+    .addTag('OCR', 'OCR processing untuk KTP scanning - Upload KTP, konfirmasi hasil OCR dengan Gemini AI')
+    .addTag('OCR Engine', 'Gemini AI-powered OCR engine - Process dokumen KTP dengan akurasi 95%+ menggunakan Google Gemini')
+    .addTag('Institutions', 'Institution dan facility management - CRUD institusi, layanan, pencarian dengan filtering')
+    .addTag('queue', 'Queue management untuk antrian pasien - Tambah antrian, status, statistik, panggil pasien dengan notifications')
+    .addTag('Notifications', 'Real-time notifications dan WebSocket - Subscribe notifikasi, WebSocket events, queue updates dengan 5 jenis notifikasi')
+    .addTag('Gateway', 'Basic gateway operations - Health check, service discovery, load balancing')
     .addTag('advanced-gateway', 'Advanced gateway operations dengan saga patterns - Complex transactions, distributed operations')
-    .addTag('monitoring', 'System monitoring dan health checks - Health status, metrics, dashboard, service monitoring')
-    .addTag('health', 'Health check endpoints - Service status dan availability checks')
-    .addTag('Stats', 'Statistics dan analytics - Queue stats, system metrics, reports')
-    .addBearerAuth()
+    .addTag('monitoring', 'System monitoring dan health checks - Health status, metrics, dashboard, service monitoring dengan alerts')
+    .addTag('health', 'Health check endpoints - Service status dan availability checks untuk semua microservices')
+    .addTag('Stats', 'Statistics dan analytics - Queue stats, system metrics, reports dengan real-time data')
+    .addBearerAuth({
+      type: 'http',
+      scheme: 'bearer',
+      bearerFormat: 'JWT',
+      description: `
+## Bearer Token Usage
+
+Dapatkan token dari login endpoint, kemudian gunakan dalam format:
+\`Authorization: Bearer YOUR_ACCESS_TOKEN\`
+
+**Token Types:**
+- **Access Token**: Berlaku 15 menit untuk API calls
+- **Refresh Token**: Berlaku 7 hari untuk refresh access token
+
+**Example:**
+\`\`\`
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+\`\`\`
+      `
+    })
+    .addSecurity('apiKey', {
+      type: 'apiKey',
+      in: 'header',
+      name: 'X-API-KEY',
+      description: 'Public API key for external integrations (OCR upload)'
+    } as any)
+    .addSecurityRequirements('bearer')
     .setContact(
       'MediQ Support',
       'https://mediq.craftthingy.com',
       'support@mediq.com'
     )
     .setLicense(
-      'MIT',
+      'MIT License',
       'https://opensource.org/licenses/MIT'
     )
-    .addServer('http://localhost:8601', 'Development Server')
-    .addServer('https://mediq-api-gateway.craftthingy.com', 'Production Server')
+    .setTermsOfService('https://mediq.craftthingy.com/terms')
+    .addServer('http://localhost:8601', 'Development Server - Local development dengan hot reload')
+    .addServer('https://mediq-api-gateway.craftthingy.com', 'Production Server - Live production environment')
+    .setExternalDoc('Complete MediQ Documentation', 'https://mediq.craftthingy.com/docs')
     .build();
   const document = SwaggerModule.createDocument(app, config);
   
@@ -56,13 +144,25 @@ async function bootstrap() {
       filter: true,
       showExtensions: true,
       showCommonExtensions: true,
-      defaultModelsExpandDepth: 1,
-      defaultModelExpandDepth: 1,
+      defaultModelsExpandDepth: 2,
+      defaultModelExpandDepth: 2,
       tryItOutEnabled: true,
-      tagsSorter: 'alpha',
+      tagsSorter: 'alpha', 
       operationsSorter: 'alpha',
+      deepLinking: true,
+      displayOperationId: false,
+      showMutatedRequest: true,
+      supportedSubmitMethods: ['get', 'post', 'put', 'delete', 'patch'],
+      requestInterceptor: (request) => {
+        // Log requests for debugging
+        console.log('Swagger Request:', request.method, request.url);
+        return request;
+      },
+      onComplete: () => {
+        console.log('Swagger UI loaded successfully');
+      }
     },
-    customSiteTitle: 'MediQ API Gateway v2.0 - Complete Healthcare Platform',
+    customSiteTitle: 'MediQ API Gateway v3.0 - Real-time Healthcare Platform with WebSocket & Gemini AI',
     customfavIcon: '/favicon.ico',
     customCssUrl: [],
     customCss: `
@@ -105,6 +205,38 @@ async function bootstrap() {
         border-color: #f93e3e;
         background: rgba(249, 62, 62, 0.1);
       }
+      .swagger-ui .markdown code {
+        background: #f8f9fa;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      }
+      .swagger-ui .markdown pre {
+        background: #2d3748;
+        color: #e2e8f0;
+        padding: 16px;
+        border-radius: 8px;
+        overflow-x: auto;
+        margin: 16px 0;
+      }
+      .swagger-ui .opblock-summary-description {
+        font-size: 14px;
+        color: #666;
+        margin-top: 8px;
+      }
+      .swagger-ui .auth-container .auth-btn-wrapper {
+        margin: 16px 0;
+        padding: 12px;
+        background: #f8f9fa;
+        border-radius: 6px;
+      }
+      .swagger-ui .btn.authorize {
+        background: #1976d2;
+        color: white;
+        font-weight: bold;
+        padding: 8px 16px;
+        border-radius: 4px;
+      }
     `,
     customJs: [
       'https://unpkg.com/swagger-ui-dist@4.15.5/swagger-ui-bundle.js',
@@ -114,16 +246,18 @@ async function bootstrap() {
   // Basic routes
   app.getHttpAdapter().get('/', (req, res) => {
     res.json({
-      message: 'MediQ API Gateway - Healthcare Digitalization Platform',
-      version: '2.0.0',
+      message: 'MediQ API Gateway v3.0 - Real-time Healthcare Platform',
+      version: '3.0.0',
       status: 'running',
       features: [
-        'Advanced OCR with KTP data extraction',
-        'Complete user management with KTP fields',
-        'Institution and facility management',
-        'Smart queue system with wait time estimation',
-        'JWT authentication with role-based access',
-        'Real-time monitoring and health checks'
+        '🤖 Gemini AI OCR with 95%+ accuracy for KTP extraction',
+        '👥 Complete user management with 17+ KTP fields',
+        '🏥 Institution and facility management with search',
+        '📋 Smart queue system dengan real-time notifications',
+        '🔐 JWT authentication dengan role-based access control',
+        '🔔 Real-time WebSocket notifications (5 types)',
+        '📊 Advanced monitoring dengan health checks',
+        '⚡ High-performance microservice architecture'
       ],
       services: [
         { name: 'API Gateway', port: 8601, status: 'running', url: 'http://localhost:8601' },

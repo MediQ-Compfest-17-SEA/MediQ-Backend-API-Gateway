@@ -30,9 +30,62 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Buat pengguna baru' })
-  @ApiResponse({ status: 201, description: 'Pengguna berhasil dibuat' })
-  @ApiResponse({ status: 400, description: 'Data tidak valid' })
+  @ApiOperation({ 
+    summary: 'Buat pengguna baru dengan data KTP lengkap',
+    description: `
+Registrasi pengguna baru dengan data KTP lengkap dari hasil OCR atau input manual.
+
+**Contoh Request:**
+\`\`\`json
+{
+  "nik": "1234567890123456",
+  "nama": "SULISTYONO", 
+  "tempat_lahir": "KEDIRI",
+  "tgl_lahir": "1966-02-26",
+  "jenis_kelamin": "LAKI-LAKI",
+  "alamat": "JL.RAYA - DSN PURWOKERTO",
+  "rt_rw": "002/003",
+  "kel_desa": "PURWOKERTO",
+  "kecamatan": "NGADILUWIH",
+  "agama": "ISLAM",
+  "status_perkawinan": "KAWIN",
+  "pekerjaan": "GURU",
+  "kewarganegaraan": "WNI"
+}
+\`\`\`
+
+**Auto-triggers:**
+- 🔔 Registration success notification
+- 📧 Welcome email/SMS (jika configured)
+    `
+  })
+  @ApiResponse({ 
+    status: 201, 
+    description: 'Pengguna berhasil dibuat dengan notification otomatis',
+    schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', example: 'user-789' },
+        nik: { type: 'string', example: '1234567890123456' },
+        nama: { type: 'string', example: 'SULISTYONO' },
+        role: { type: 'string', example: 'PASIEN' },
+        created_at: { type: 'string', example: '2024-01-20T10:30:00.000Z' },
+        notification_sent: { type: 'boolean', example: true }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Data tidak valid atau NIK sudah terdaftar',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 400 },
+        message: { type: 'array', items: { type: 'string' }, example: ['NIK harus 16 digit', 'Nama wajib diisi'] },
+        error: { type: 'string', example: 'Bad Request' }
+      }
+    }
+  })
   async create(@Body() createUserDto: CreateUserDto) {
     return this.usersService.create(createUserDto);
   }

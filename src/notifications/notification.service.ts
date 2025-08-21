@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { GatewayService } from '../gateway/gateway.service';
+import { MediQWebSocketGateway } from '../websocket/websocket.gateway';
 
 export enum NotificationType {
   REGISTRATION_SUCCESS = 'registration_success',
@@ -23,7 +24,11 @@ export interface NotificationData {
 export class NotificationService {
   private readonly logger = new Logger(NotificationService.name);
 
-  constructor(private readonly gatewayService: GatewayService) {}
+  constructor(
+    private readonly gatewayService: GatewayService,
+    @Inject(forwardRef(() => MediQWebSocketGateway))
+    private readonly webSocketGateway: MediQWebSocketGateway,
+  ) {}
 
   async sendRegistrationSuccessNotification(userId: string, userData: any) {
     const notification: NotificationData = {
@@ -153,7 +158,7 @@ export class NotificationService {
       await this.storeNotification(userId, notification);
       
       // Send via WebSocket if user is connected
-      this.broadcastToUser(userId, 'notification', notification);
+      this.webSocketGateway.sendNotification(userId, notification);
       
     } catch (error) {
       this.logger.error(`Failed to send notification to user ${userId}:`, error);
@@ -166,17 +171,7 @@ export class NotificationService {
     this.logger.debug(`Storing notification for user ${userId}: ${notification.type}`);
   }
 
-  setBroadcastCallback(callback: (userId: string, event: string, data: any) => void) {
-    this.broadcastCallback = callback;
-  }
-
-  private broadcastCallback: (userId: string, event: string, data: any) => void;
-
-  private broadcastToUser(userId: string, event: string, data: any) {
-    if (this.broadcastCallback) {
-      this.broadcastCallback(userId, event, data);
-    }
-  }
+  // Legacy callback API removed; using direct WebSocket gateway now
 
   async getQueueStatus(institutionId: string) {
     try {

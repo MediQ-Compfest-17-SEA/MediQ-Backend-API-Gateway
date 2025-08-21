@@ -5,9 +5,11 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   
-  // Enable CORS
+  // Enable CORS for all origins
   app.enableCors({
-    origin: true,
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
     credentials: true,
   });
 
@@ -19,9 +21,10 @@ async function bootstrap() {
     .addTag('Authentication', 'Authentication dan authorization endpoints - Login admin/user, refresh token, logout')
     .addTag('Users', 'User management dengan data KTP lengkap - CRUD user, profil, role management')
     .addTag('OCR', 'OCR processing untuk KTP scanning - Upload KTP, konfirmasi hasil OCR')
-    .addTag('OCR Engine', 'ML-powered OCR engine dengan YOLO + EasyOCR - Process dokumen, scan KTP/SIM, validasi hasil')
+    .addTag('OCR Engine', 'Gemini AI-powered OCR engine - Process dokumen KTP dengan akurasi tinggi menggunakan Google Gemini')
     .addTag('Institutions', 'Institution dan facility management - CRUD institusi, layanan, pencarian')
     .addTag('queue', 'Queue management untuk antrian pasien - Tambah antrian, status, statistik, panggil pasien')
+    .addTag('Notifications', 'Real-time notifications dan WebSocket - Subscribe notifikasi, WebSocket events, queue updates')
     .addTag('Gateway', 'Basic gateway operations - Health check, service discovery')
     .addTag('advanced-gateway', 'Advanced gateway operations dengan saga patterns - Complex transactions, distributed operations')
     .addTag('monitoring', 'System monitoring dan health checks - Health status, metrics, dashboard, service monitoring')
@@ -131,7 +134,7 @@ async function bootstrap() {
         { name: 'Institution', port: 8606, status: 'running', url: 'https://mediq-institution-service.craftthingy.com' },
       ],
       documentation: '/api/docs',
-      totalEndpoints: 40,
+      totalEndpoints: 48,
       endpoints: {
         Authentication: ['/auth/login/admin', '/auth/login/user', '/auth/refresh', '/auth/logout'],
         Users: ['/users', '/users/profile', '/users/check-nik/{nik}', '/users/{id}', '/users/{id}/role'],
@@ -139,11 +142,19 @@ async function bootstrap() {
         'OCR Engine': ['/ocr-engine/process', '/ocr-engine/scan-ocr', '/ocr-engine/validate-result'],
         Institutions: ['/institutions', '/institutions/search', '/institutions/{id}', '/institutions/{id}/services', '/institutions/{id}/queue/stats'],
         queue: ['/queue', '/queue/my-queue', '/queue/stats', '/queue/{id}', '/queue/{id}/status', '/queue/{id}/call', '/queue/institution/{id}/current', '/queue/institution/{id}/next'],
+        Notifications: ['/notifications/subscribe', '/notifications/trigger/{type}', '/notifications/status/websocket', '/notifications/queue/{institutionId}/status', '/notifications/queue/{institutionId}/broadcast'],
+        WebSocket: ['/api/websocket - Real-time updates'],
         Gateway: ['/gateway/health', '/gateway/status'],
         'advanced-gateway': ['/advanced-gateway/saga-transaction', '/advanced-gateway/distributed-operation'],
         monitoring: ['/monitoring/health', '/monitoring/metrics', '/monitoring/services', '/monitoring/dashboard'],
         health: ['/health'],
         Stats: ['/stats/queue', '/stats/system', '/stats/reports']
+      },
+      realTimeFeatures: {
+        websocket: '/api/websocket',
+        notifications: ['registration_success', 'queue_joined', 'queue_almost_ready', 'queue_ready', 'consultation_completed'],
+        queueUpdates: 'Real-time queue status dari semua institusi',
+        subscriptions: 'User dapat subscribe ke notifikasi spesifik'
       }
     });
   });
@@ -162,7 +173,9 @@ async function bootstrap() {
   console.log(`📚 API Documentation: http://localhost:${port}/api/docs`);
   console.log(`🔄 Clear Cache: http://localhost:${port}/api/docs/refresh`);
   console.log(`💚 Health Check: http://localhost:${port}/health`);
-  console.log(`📊 Total Endpoints: 40 (11 categories: Authentication, Users, OCR, OCR Engine, Institutions, queue, Gateway, advanced-gateway, monitoring, health, Stats)`);
+  console.log(`📊 Total Endpoints: 48 (13 categories: Authentication, Users, OCR, OCR Engine, Institutions, queue, Notifications, WebSocket, Gateway, advanced-gateway, monitoring, health, Stats)`);
+  console.log(`🔗 WebSocket Endpoint: ws://localhost:${port}/api/websocket`);
+  console.log(`🔔 Real-time Notifications: registration, queue updates, consultation events`);
 }
 
 bootstrap().catch((error) => {

@@ -10,6 +10,8 @@ import { AuthModule } from './auth/auth.module';
 import { GatewayModule } from './gateway/gateway.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { QueueModule } from './queue/queue.module';
+import { WebSocketModule } from './websocket/websocket.module';
+import { NotificationModule } from './notifications/notification.module';
 
 @Module({
   imports: [
@@ -81,6 +83,8 @@ import { QueueModule } from './queue/queue.module';
     OcrEngineModule,
     MonitoringModule,
     QueueModule,
+    WebSocketModule,
+    NotificationModule,
   ],
   controllers: [HealthController],
   providers: [],

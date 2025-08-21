@@ -1,13 +1,32 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { GatewayService } from '../gateway/gateway.service';
 import { UpdateRoleDto } from '../auth/dto/update-role.dto';
+import { NotificationService } from '../notifications/notification.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly gatewayService: GatewayService) {}
+  constructor(
+    private readonly gatewayService: GatewayService,
+    @Inject(forwardRef(() => NotificationService))
+    private readonly notificationService: NotificationService,
+  ) {}
 
   async create(userData: any) {
-    return this.gatewayService.sendToUserService('user.create', userData);
+    const result = await this.gatewayService.sendToUserService('user.create', userData);
+    
+    // Trigger registration success notification
+    if (result && !result.error) {
+      try {
+        await this.notificationService.sendRegistrationSuccessNotification(result.id, {
+          nama: userData.nama,
+          nik: userData.nik
+        });
+      } catch (error) {
+        console.log('Failed to send registration notification:', error.message);
+      }
+    }
+    
+    return result;
   }
 
   async checkNik(nik: string) {

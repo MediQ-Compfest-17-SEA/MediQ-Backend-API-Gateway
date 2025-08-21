@@ -1,8 +1,9 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { NotificationService } from './notification.service';
 import { NotificationController } from './notification.controller';
 import { GatewayModule } from '../gateway/gateway.module';
+import { WebSocketModule } from '../websocket/websocket.module';
 
 @Module({
   imports: [
@@ -11,6 +12,7 @@ import { GatewayModule } from '../gateway/gateway.module';
       signOptions: { expiresIn: '15m' },
     }),
     GatewayModule,
+    forwardRef(() => WebSocketModule),
   ],
   controllers: [NotificationController],
   providers: [NotificationService],

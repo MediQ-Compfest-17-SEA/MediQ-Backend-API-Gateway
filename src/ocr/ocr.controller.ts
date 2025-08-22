@@ -1,11 +1,15 @@
 import {
   Controller,
   Post,
+  Get,
+  Patch,
+  Param,
   Body,
   UseGuards,
   UseInterceptors,
   UploadedFile,
   UploadedFiles,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -33,10 +37,17 @@ export class OcrController {
   @Post('upload')
   @UseGuards(JwtOrApiKeyGuard)
   @UseInterceptors(
-    FileFieldsInterceptor([
-      { name: 'file', maxCount: 1 },
-      { name: 'image', maxCount: 1 },
-    ]),
+    FileFieldsInterceptor(
+      [
+        { name: 'file', maxCount: 1 },
+        { name: 'image', maxCount: 1 },
+      ],
+      {
+        limits: {
+          fileSize: 20 * 1024 * 1024, // 20MB safety cap matching nginx config
+        },
+      },
+    ),
   )
   @ApiBearerAuth()
   @ApiHeader({ name: 'X-API-KEY', required: false, description: 'Alternatif untuk Bearer token (external access)' })
@@ -66,7 +77,7 @@ export class OcrController {
   ) {
     const uploaded: Express.Multer.File | undefined = (files?.file?.[0] || files?.image?.[0]);
     if (!uploaded) {
-      throw new Error('No file provided. Use form field "file" or "image".');
+      throw new BadRequestException('No file provided. Use form field "file" or "image".');
     }
     return this.ocrService.uploadKtp(uploaded, user);
   }
@@ -78,7 +89,42 @@ export class OcrController {
   @ApiResponse({ status: 200, description: 'Hasil OCR berhasil dikonfirmasi' })
   @ApiResponse({ status: 400, description: 'Data tidak valid' })
   @ApiResponse({ status: 401, description: 'Token tidak valid' })
-  async confirmOcr(@Body() confirmData: any, @CurrentUser() user: any) {
+  async confirmOcr(@Body() confirmData: any, @CurrentUser() user: any): Promise<any> {
     return this.ocrService.confirmOcr(confirmData, user);
+  }
+
+  @Get('temp/:tempId')
+  @ApiOperation({ summary: 'Ambil data OCR sementara (tempId) via Gateway' })
+  @ApiResponse({ status: 200, description: 'Data temporary ditemukan' })
+  async getTemp(@Param('tempId') tempId: string): Promise<any> {
+    return this.ocrService.getTemp(tempId);
+  }
+
+  @Patch('temp/:tempId')
+  @UseGuards(JwtOrApiKeyGuard)
+  @ApiBearerAuth()
+  @ApiHeader({ name: 'X-API-KEY', required: false, description: 'Alternatif untuk Bearer token (external access)' })
+  @ApiOperation({ summary: 'Patch data OCR sementara (nama, email, dll.) via Gateway' })
+  @ApiBody({ description: 'Fields untuk update', schema: { type: 'object', additionalProperties: true } })
+  @ApiResponse({ status: 200, description: 'Data temporary terupdate' })
+  @ApiResponse({ status: 401, description: 'Token tidak valid' })
+  async patchTemp(@Param('tempId') tempId: string, @Body() patch: any): Promise<any> {
+    return this.ocrService.patchTemp(tempId, patch);
+  }
+
+  @Post('confirm-temp/:tempId')
+  @UseGuards(JwtOrApiKeyGuard)
+  @ApiBearerAuth()
+  @ApiHeader({ name: 'X-API-KEY', required: false, description: 'Alternatif untuk Bearer token (external access)' })
+  @ApiOperation({ summary: 'Konfirmasi dari tempId via Gateway (hapus temp, daftar antrian)' })
+  @ApiBody({ description: 'Optional institutionId', schema: { type: 'object', properties: { institutionId: { type: 'string' } } } })
+  @ApiResponse({ status: 200, description: 'Berhasil konfirmasi dan hapus temporary' })
+  @ApiResponse({ status: 401, description: 'Token tidak valid' })
+  async confirmTemp(
+    @Param('tempId') tempId: string,
+    @Body('institutionId') institutionId: string | undefined,
+    @CurrentUser() user: any,
+  ): Promise<any> {
+    return this.ocrService.confirmTemp(tempId, institutionId, user);
   }
 }

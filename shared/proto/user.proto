@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package user.v1;
+
+// User service definition for internal gRPC (Gateway & services)
+service UserService {
+  // Get full user profile by user id (UUID)
+  rpc GetById (GetByIdRequest) returns (UserProfileResponse);
+}
+
+// ---------- Messages ----------
+
+message GetByIdRequest {
+  string id = 1;
+}
+
+message UserProfileResponse {
+  string id = 1;
+  string email = 2;
+  string name = 3;
+  string nik = 4;
+  string role = 5;
+  string createdAt = 6;
+  string updatedAt = 7;
+}

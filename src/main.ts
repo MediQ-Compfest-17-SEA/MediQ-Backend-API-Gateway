@@ -1,9 +1,19 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { ValidationPipe } from '@nestjs/common';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Removed global prefix to simplify endpoint paths
+  // app.setGlobalPrefix('api/v1');
+
+  app.useGlobalPipes(new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+  }));
   
   // Enable CORS for all origins
   app.enableCors({
@@ -13,8 +23,17 @@ async function bootstrap() {
     credentials: true,
   });
 
+  // Resolve example and server base URLs for Swagger (prefer env var/public domain)
+  const exampleBaseUrl =
+    process.env.SWAGGER_EXAMPLE_BASE_URL ||
+    process.env.SWAGGER_SERVER_URL ||
+    (process.env.NODE_ENV === 'production'
+      ? 'https://mediq-api-gateway.craftthingy.com'
+      : 'http://localhost:8601');
+  const wsExampleBaseUrl = exampleBaseUrl.replace(/^http/, 'ws');
+
   // Swagger documentation
-  const config = new DocumentBuilder()
+  const builder = new DocumentBuilder()
     .setTitle('MediQ API Gateway v3.0')
     .setDescription(`
 # MediQ Healthcare Platform API Gateway
@@ -32,27 +51,27 @@ Centralized API Gateway untuk semua MediQ Backend Services dengan advanced authe
 
 ### 1. Admin Login
 \`\`\`bash
-curl -X POST http://localhost:8601/auth/login/admin \\
+curl -X POST ${exampleBaseUrl}/auth/login/admin \\
   -H "Content-Type: application/json" \\
   -d '{"email": "admin@mediq.com", "password": "admin123"}'
 \`\`\`
 
 ### 2. User Login  
 \`\`\`bash
-curl -X POST http://localhost:8601/auth/login/user \\
+curl -X POST ${exampleBaseUrl}/auth/login/user \\
   -H "Content-Type: application/json" \\
-  -d '{"nik": "1234567890123456", "nama": "John Doe"}'
+  -d "{\\\"nik\\\": \\\"3204123456780001\\\", \\\"nama\\\": \\\"Budi Santoso\\\"}"
 \`\`\`
 
 ### 3. Using Bearer Token
 \`\`\`bash
-curl -X GET http://localhost:8601/users/profile \\
+curl -X GET ${exampleBaseUrl}/users/profile \\
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 \`\`\`
 
 ## 🔗 WebSocket Connection
 \`\`\`javascript
-const socket = io('http://localhost:8601/api/websocket', {
+const socket = io('${wsExampleBaseUrl}/api/websocket', {
   auth: { token: 'YOUR_JWT_TOKEN' }
 });
 
@@ -66,12 +85,12 @@ socket.emit('subscribe_notifications', {
 ## 📋 Queue Management Example
 \`\`\`bash
 # Add to queue
-curl -X POST http://localhost:8601/queue \\
+curl -X POST ${exampleBaseUrl}/queue \\
   -H "Authorization: Bearer YOUR_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{
     "userId": "user-123",
-    "institutionId": "inst-456", 
+    "institutionId": "inst-456",
     "serviceType": "konsultasi",
     "priority": "normal"
   }'
@@ -80,7 +99,7 @@ curl -X POST http://localhost:8601/queue \\
     .setVersion('3.0')
     .addTag('Authentication', 'Authentication dan authorization endpoints - Login admin/user, refresh token, logout dengan contoh lengkap')
     .addTag('Users', 'User management dengan data KTP lengkap - CRUD user, profil, role management, check NIK')
-    .addTag('OCR', 'OCR processing untuk KTP scanning - Upload KTP, konfirmasi hasil OCR dengan Gemini AI')
+    .addTag('OCR', 'OCR processing: upload KTP, kelola data sementara (temp), patch data user/institusi, confirm-temp untuk registrasi & antrian')
     .addTag('OCR Engine', 'Gemini AI-powered OCR engine - Process dokumen KTP dengan akurasi 95%+ menggunakan Google Gemini')
     .addTag('Institutions', 'Institution dan facility management - CRUD institusi, layanan, pencarian dengan filtering')
     .addTag('queue', 'Queue management untuk antrian pasien - Tambah antrian, status, statistik, panggil pasien dengan notifications')
@@ -126,12 +145,34 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
       'MIT License',
       'https://opensource.org/licenses/MIT'
     )
-    .setTermsOfService('https://mediq.craftthingy.com/terms')
-    .addServer('http://localhost:8601', 'Development Server - Local development dengan hot reload')
-    .addServer('https://mediq-api-gateway.craftthingy.com', 'Production Server - Live production environment')
-    .setExternalDoc('Complete MediQ Documentation', 'https://mediq.craftthingy.com/docs')
-    .build();
+    .setTermsOfService('https://mediq.craftthingy.com/terms');
+
+  // Prefer explicit server URL from env; fall back by environment
+  if (process.env.SWAGGER_SERVER_URL) {
+    builder.addServer(process.env.SWAGGER_SERVER_URL, 'Primary Server');
+  } else if (process.env.NODE_ENV === 'production') {
+    builder.addServer('https://mediq-api-gateway.craftthingy.com', 'Primary Server');
+  } else {
+    builder.addServer('http://localhost:8601', 'Development Server - Local development dengan hot reload');
+  }
+
+  // Optional: when not production, offer production URL as an alternative in the dropdown
+  if (process.env.NODE_ENV !== 'production') {
+    builder.addServer('https://mediq-api-gateway.craftthingy.com', 'Production Server - Live production environment');
+  }
+
+  builder.setExternalDoc('Complete MediQ Documentation', 'https://mediq.craftthingy.com/docs');
+
+  const config = builder.build();
   const document = SwaggerModule.createDocument(app, config);
+
+  // Serve raw JSON spec for tooling and to avoid UI cache confusion
+  app.getHttpAdapter().get('/api-json', (req, res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.json(document);
+  });
   
   // Add timestamp to force cache refresh
   const timestamp = Date.now();
@@ -260,7 +301,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
         '⚡ High-performance microservice architecture'
       ],
       services: [
-        { name: 'API Gateway', port: 8601, status: 'running', url: 'http://localhost:8601' },
+        { name: 'API Gateway', port: 8601, status: 'running', url: exampleBaseUrl },
         { name: 'User Service', port: 8602, status: 'running', url: 'https://mediq-user-service.craftthingy.com' },
         { name: 'OCR Service', port: 8603, status: 'running', url: 'https://mediq-ocr-service.craftthingy.com' },
         { name: 'OCR Engine', port: 8604, status: 'running', url: 'https://mediq-ocr-engine-service.craftthingy.com' },
@@ -272,7 +313,12 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
       endpoints: {
         Authentication: ['/auth/login/admin', '/auth/login/user', '/auth/refresh', '/auth/logout'],
         Users: ['/users', '/users/profile', '/users/check-nik/{nik}', '/users/{id}', '/users/{id}/role'],
-        OCR: ['/ocr/upload', '/ocr/confirm'],
+        OCR: [
+          '/ocr/upload',
+          '/ocr/confirm',
+          '/ocr/temp/{tempId}',
+          '/ocr/confirm-temp/{tempId}'
+        ],
         'OCR Engine': ['/ocr-engine/process', '/ocr-engine/scan-ocr', '/ocr-engine/validate-result'],
         Institutions: ['/institutions', '/institutions/search', '/institutions/{id}', '/institutions/{id}/services', '/institutions/{id}/queue/stats'],
         queue: ['/queue', '/queue/my-queue', '/queue/stats', '/queue/{id}', '/queue/{id}/status', '/queue/{id}/call', '/queue/institution/{id}/current', '/queue/institution/{id}/next'],

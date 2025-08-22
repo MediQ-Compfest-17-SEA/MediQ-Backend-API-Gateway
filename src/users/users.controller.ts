@@ -101,11 +101,43 @@ Registrasi pengguna baru dengan data KTP lengkap dari hasil OCR atau input manua
   @Get('profile')
   @UseGuards(AuthGuard('jwt'))
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Dapatkan profil pengguna yang sedang login' })
-  @ApiResponse({ status: 200, description: 'Profil pengguna berhasil didapat' })
+  @ApiOperation({ summary: 'Dapatkan profil pengguna yang sedang login (legacy passthrough dari JWT payload)' })
+  @ApiResponse({ status: 200, description: 'Profil pengguna berhasil didapat (payload JWT)' })
   @ApiResponse({ status: 401, description: 'Token tidak valid' })
   async getProfile(@CurrentUser() user: any) {
     return this.usersService.getProfile(user);
+  }
+
+  @Get('me')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Dapatkan data user lengkap dari JWT token (ambil dari database berdasarkan sub)' })
+  @ApiResponse({ status: 200, description: 'Data lengkap pengguna berhasil didapat' })
+  @ApiResponse({ status: 401, description: 'Token tidak valid' })
+  async getMe(@CurrentUser() user: any) {
+    try {
+      const data = await this.usersService.getMeFromJwt(user);
+      return { success: true, data };
+    } catch (error: any) {
+      // Do not propagate as 500 - return structured payload for external callers
+      return { success: false, error: error?.message || 'failed_to_resolve_user_from_jwt' };
+    }
+  }
+
+  @Get(':id')
+  @UseGuards(AuthGuard('jwt'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Dapatkan data user lengkap berdasarkan user id' })
+  @ApiParam({ name: 'id', description: 'ID pengguna (UUID)' })
+  @ApiResponse({ status: 200, description: 'Data lengkap pengguna berhasil didapat' })
+  @ApiResponse({ status: 401, description: 'Token tidak valid' })
+  async getById(@Param('id') id: string) {
+    try {
+      const data = await this.usersService.getUserById(id);
+      return { success: true, data };
+    } catch (error: any) {
+      return { success: false, error: error?.message || 'failed_to_fetch_user_by_id' };
+    }
   }
 
   @Get()

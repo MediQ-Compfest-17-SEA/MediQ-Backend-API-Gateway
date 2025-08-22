@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { join } from 'path';
 import { HealthController } from './health/health.controller';
 import { UsersModule } from './users/users.module';
 import { OcrModule } from './ocr/ocr.module';
@@ -18,62 +19,29 @@ import { NotificationModule } from './notifications/notification.module';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    // Replace RMQ with gRPC clients (phase 1 & 2: user + ocr)
     ClientsModule.register([
       {
-        name: 'USER_SERVICE',
-        transport: Transport.RMQ,
+        name: 'USER_GRPC',
+        transport: Transport.GRPC,
         options: {
-          urls: [process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672'],
-          queue: 'user_queue',
-          queueOptions: {
-            durable: true,
-          },
+          package: 'user.v1',
+          // dist/app.module.js lives under dist, so one level up to reach shared/proto
+          protoPath: join(__dirname, '../shared/proto/user.proto'),
+          url: process.env.USER_GRPC_URL || 'localhost:51052',
         },
       },
       {
-        name: 'PATIENT_QUEUE_SERVICE', 
-        transport: Transport.RMQ,
+        name: 'OCR_GRPC',
+        transport: Transport.GRPC,
         options: {
-          urls: [process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672'],
-          queue: 'patient_queue',
-          queueOptions: {
-            durable: true,
-          },
+          package: 'ocr.v1',
+          // dist/app.module.js lives under dist, so one level up to reach shared/proto
+          protoPath: join(__dirname, '../shared/proto/ocr.proto'),
+          url: process.env.OCR_GRPC_URL || 'localhost:51053',
         },
       },
-      {
-        name: 'OCR_SERVICE',
-        transport: Transport.RMQ,
-        options: {
-          urls: [process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672'],
-          queue: 'ocr_service_queue',
-          queueOptions: {
-            durable: true,
-          },
-        },
-      },
-      {
-        name: 'INSTITUTION_SERVICE',
-        transport: Transport.RMQ,
-        options: {
-          urls: [process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672'],
-          queue: 'institution_service_queue',
-          queueOptions: {
-            durable: true,
-          },
-        },
-      },
-      {
-        name: 'OCR_ENGINE_SERVICE',
-        transport: Transport.RMQ,
-        options: {
-          urls: [process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672'],
-          queue: 'ocr_engine_service_queue',
-          queueOptions: {
-            durable: true,
-          },
-        },
-      },
+      // TODO: Subsequent phases - add Queue, Institution, OCR Engine gRPC clients
     ]),
     GatewayModule,
     AuthModule,

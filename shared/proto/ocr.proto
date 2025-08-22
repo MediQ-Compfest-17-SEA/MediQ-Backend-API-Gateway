@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package ocr.v1;
+
+// OCR internal gRPC service (Gateway & other services)
+// Public upload remains HTTP multipart; gRPC covers internal data flows.
+service OcrService {
+  // Get temporary OCR data by tempId
+  rpc GetTemp (GetTempRequest) returns (GetTempResponse);
+
+  // Patch temporary OCR data (KTP/user/institution)
+  rpc PatchTemp (PatchTempRequest) returns (PatchTempResponse);
+
+  // Confirm OCR data (direct) - not commonly used by Gateway; prefer ConfirmTemp
+  rpc Confirm (ConfirmRequest) returns (ConfirmResponse);
+
+  // Confirm from tempId (primary flow) and add to queue
+  rpc ConfirmTemp (ConfirmTempRequest) returns (ConfirmTempResponse);
+}
+
+// ---------- Messages ----------
+
+message GetTempRequest {
+  string tempId = 1;
+}
+
+message GetTempResponse {
+  bool success = 1;
+  string tempId = 2;
+  // JSON string of current temp data (dynamic structure)
+  string dataJson = 3;
+  string error = 4;
+}
+
+message PatchTempRequest {
+  string tempId = 1;
+  // JSON string of patch payload: { ktp?: OcrData, user?: UserData, institution?: InstitutionData }
+  string patchJson = 2;
+}
+
+message PatchTempResponse {
+  bool success = 1;
+  string tempId = 2;
+  // JSON string of updated data
+  string dataJson = 3;
+  string error = 4;
+}
+
+message ConfirmRequest {
+  // JSON string of confirmed OCR data (OcrData)
+  string dataJson = 1;
+  // optional
+  string institutionId = 2;
+}
+
+message ConfirmResponse {
+  bool success = 1;
+  string message = 2;
+  // JSON string of queue information
+  string queueJson = 3;
+  // JSON string containing tokens, if any
+  string tokensJson = 4;
+  string error = 5;
+}
+
+message ConfirmTempRequest {
+  string tempId = 1;
+  // optional
+  string institutionId = 2;
+}
+
+message ConfirmTempResponse {
+  bool success = 1;
+  string message = 2;
+  // JSON string of queue information
+  string queueJson = 3;
+  // JSON string containing tokens, if any
+  string tokensJson = 4;
+  string tempIdDeleted = 5;
+  string error = 6;
+}

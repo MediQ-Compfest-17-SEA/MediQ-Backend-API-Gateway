@@ -51,13 +51,21 @@ export class GatewayService {
     try {
       this.logger.log(`Sending message to OCR service: ${pattern}`, data);
 
+      // Dynamically tune timeout for long-running OCR confirm flows
+      const defaultTimeout = Number(process.env.TIMEOUT_MS || 5000);
+      const ocrTimeout = Number(process.env.OCR_TIMEOUT_MS || 15000);
+      const effectiveTimeout =
+        pattern === 'ocr.confirm-temp' || pattern === 'ocr.confirm'
+          ? ocrTimeout
+          : defaultTimeout;
+
       const result = await firstValueFrom(
         this.ocrServiceClient.send(pattern, data).pipe(
-          timeout(5000),
+          timeout(effectiveTimeout),
           retry({ count: 2, delay: 1000 }),
           catchError((error) => {
             this.logger.error(
-              `Error communicating with OCR service: ${error.message}`,
+              `Error communicating with OCR service [${pattern}]: ${error.message}`,
             );
             throw new RpcException(error);
           }),
@@ -68,7 +76,7 @@ export class GatewayService {
       return result;
     } catch (error) {
       this.logger.error(
-        `Failed to communicate with OCR service: ${error.message}`,
+        `Failed to communicate with OCR service [${pattern}]: ${error.message}`,
       );
       throw error;
     }

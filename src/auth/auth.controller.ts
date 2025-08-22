@@ -33,11 +33,11 @@ Login untuk administrator dengan credential email dan password.
 **Contoh Response Success:**
 \`\`\`json
 {
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   "user": {
     "id": "admin-123",
-    "email": "admin@mediq.com", 
+    "email": "admin@mediq.com",
     "role": "ADMIN_FASKES",
     "nama": "Administrator"
   },
@@ -52,8 +52,8 @@ Login untuk administrator dengan credential email dan password.
     schema: {
       type: 'object',
       properties: {
-        access_token: { type: 'string', description: 'JWT access token (15 menit)', example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' },
-        refresh_token: { type: 'string', description: 'JWT refresh token (7 hari)', example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' },
+        accessToken: { type: 'string', description: 'JWT access token (15 menit)', example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' },
+        refreshToken: { type: 'string', description: 'JWT refresh token (7 hari)', example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' },
         user: {
           type: 'object',
           properties: {
@@ -92,16 +92,16 @@ Login untuk pasien/user dengan NIK dan nama sesuai KTP.
 **Contoh Request:**
 \`\`\`json
 {
-  "nik": "1234567890123456",
-  "nama": "SULISTYONO"
+  "nik": "3204123456780001",
+  "name": "Budi Santoso"
 }
 \`\`\`
 
 **Contoh Response Success:**
 \`\`\`json
 {
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   "user": {
     "id": "user-456",
     "nik": "1234567890123456",
@@ -121,8 +121,8 @@ Login untuk pasien/user dengan NIK dan nama sesuai KTP.
     schema: {
       type: 'object',
       properties: {
-        access_token: { type: 'string', description: 'JWT access token (15 menit)' },
-        refresh_token: { type: 'string', description: 'JWT refresh token (7 hari)' },
+        accessToken: { type: 'string', description: 'JWT access token (15 menit)' },
+        refreshToken: { type: 'string', description: 'JWT refresh token (7 hari)' },
         user: {
           type: 'object',
           properties: {

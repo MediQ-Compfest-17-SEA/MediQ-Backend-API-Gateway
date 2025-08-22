@@ -1,14 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Body,
-  Param,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, Req, HttpException } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -24,6 +14,8 @@ import { RolesGuard } from '../auth/guards/roles/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Role } from '../auth/guards/roles/roles.guard';
+import axios from 'axios';
+import { Request } from 'express';
 
 @ApiTags('queue')
 @Controller('queue')
@@ -66,8 +58,26 @@ export class QueueController {
     @Query('institutionId') institutionId?: string,
     @Query('status') status?: string,
     @Query('date') date?: string,
+    @Req() req?: Request,
   ) {
-    return this.queueService.findAll({ institutionId, status, date });
+    try {
+      return await this.queueService.findAll({ institutionId, status, date });
+    } catch (e: any) {
+      // HTTP fallback to Patient Queue Service
+      try {
+        const base = process.env.QUEUE_HTTP_URL || process.env.PATIENT_QUEUE_HTTP_URL || 'http://127.0.0.1:8605';
+        const resp = await axios.get(`${base}/queue`, {
+          params: { institutionId, status, date },
+          headers: { Authorization: (req?.headers?.['authorization'] as string) || '' },
+          timeout: 8000,
+        });
+        return resp.data;
+      } catch (err: any) {
+        const statusCode = err?.response?.status || 500;
+        const data = err?.response?.data || { message: 'Upstream Queue Service error' };
+        throw new HttpException(data, statusCode);
+      }
+    }
   }
 
   @Get('my-queue')

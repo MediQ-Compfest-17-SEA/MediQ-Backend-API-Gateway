@@ -1,13 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Patch,
-  Param,
-  Delete,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Req, HttpException, Put } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -16,6 +7,8 @@ import {
   ApiParam,
 } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
+import axios from 'axios';
+import { Request } from 'express';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateRoleDto } from '../auth/dto/update-role.dto';
@@ -30,7 +23,7 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Post()
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Buat pengguna baru dengan data KTP lengkap',
     description: `
 Registrasi pengguna baru dengan data KTP lengkap dari hasil OCR atau input manual.
@@ -39,7 +32,7 @@ Registrasi pengguna baru dengan data KTP lengkap dari hasil OCR atau input manua
 \`\`\`json
 {
   "nik": "1234567890123456",
-  "nama": "SULISTYONO", 
+  "nama": "SULISTYONO",
   "tempat_lahir": "KEDIRI",
   "tgl_lahir": "1966-02-26",
   "jenis_kelamin": "LAKI-LAKI",
@@ -59,8 +52,8 @@ Registrasi pengguna baru dengan data KTP lengkap dari hasil OCR atau input manua
 - 📧 Welcome email/SMS (jika configured)
     `
   })
-  @ApiResponse({ 
-    status: 201, 
+  @ApiResponse({
+    status: 201,
     description: 'Pengguna berhasil dibuat dengan notification otomatis',
     schema: {
       type: 'object',
@@ -74,8 +67,8 @@ Registrasi pengguna baru dengan data KTP lengkap dari hasil OCR atau input manua
       }
     }
   })
-  @ApiResponse({ 
-    status: 400, 
+  @ApiResponse({
+    status: 400,
     description: 'Data tidak valid atau NIK sudah terdaftar',
     schema: {
       type: 'object',
@@ -86,8 +79,23 @@ Registrasi pengguna baru dengan data KTP lengkap dari hasil OCR atau input manua
       }
     }
   })
-  async create(@Body() createUserDto: CreateUserDto) {
-    return this.usersService.create(createUserDto);
+  async create(@Body() createUserDto: CreateUserDto, @Req() req: Request) {
+    try {
+      return await this.usersService.create(createUserDto);
+    } catch (e: any) {
+      try {
+        const base = process.env.USER_HTTP_URL || process.env.USER_SERVICE_HTTP_URL || 'http://127.0.0.1:8602';
+        const resp = await axios.post(`${base}/users`, createUserDto, {
+          headers: { Authorization: (req.headers['authorization'] as string) || '' },
+          timeout: 8000,
+        });
+        return resp.data;
+      } catch (err: any) {
+        const status = err?.response?.status || 500;
+        const data = err?.response?.data || { message: 'Upstream User Service error' };
+        throw new HttpException(data, status);
+      }
+    }
   }
 
   @Get('check-nik/:nik')
@@ -148,8 +156,23 @@ Registrasi pengguna baru dengan data KTP lengkap dari hasil OCR atau input manua
   @ApiResponse({ status: 200, description: 'Data pengguna berhasil didapat' })
   @ApiResponse({ status: 401, description: 'Token tidak valid' })
   @ApiResponse({ status: 403, description: 'Akses ditolak, role tidak sesuai' })
-  async findAll() {
-    return this.usersService.findAll();
+  async findAll(@Req() req: Request) {
+    try {
+      return await this.usersService.findAll();
+    } catch (e: any) {
+      try {
+        const base = process.env.USER_HTTP_URL || process.env.USER_SERVICE_HTTP_URL || 'http://127.0.0.1:8602';
+        const resp = await axios.get(`${base}/users`, {
+          headers: { Authorization: (req.headers['authorization'] as string) || '' },
+          timeout: 8000,
+        });
+        return resp.data;
+      } catch (err: any) {
+        const status = err?.response?.status || 500;
+        const data = err?.response?.data || { message: 'Upstream User Service error' };
+        throw new HttpException(data, status);
+      }
+    }
   }
 
   @Patch(':id/role')
@@ -165,8 +188,55 @@ Registrasi pengguna baru dengan data KTP lengkap dari hasil OCR atau input manua
   async updateRole(
     @Param('id') id: string,
     @Body() updateRoleDto: UpdateRoleDto,
+    @Req() req: Request,
   ) {
-    return this.usersService.updateRole(id, updateRoleDto);
+    try {
+      return await this.usersService.updateRole(id, updateRoleDto);
+    } catch (e: any) {
+      try {
+        const base = process.env.USER_HTTP_URL || process.env.USER_SERVICE_HTTP_URL || 'http://127.0.0.1:8602';
+        const resp = await axios.patch(`${base}/users/${encodeURIComponent(id)}/role`, updateRoleDto, {
+          headers: { Authorization: (req.headers['authorization'] as string) || '' },
+          timeout: 8000,
+        });
+        return resp.data;
+      } catch (err: any) {
+        const status = err?.response?.status || 500;
+        const data = err?.response?.data || { message: 'Upstream User Service error' };
+        throw new HttpException(data, status);
+      }
+    }
+  }
+
+  @Put(':id')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(Role.ADMIN_FASKES)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update data pengguna (Admin only)' })
+  @ApiParam({ name: 'id', description: 'ID pengguna' })
+  @ApiResponse({ status: 200, description: 'Data pengguna berhasil diupdate' })
+  @ApiResponse({ status: 401, description: 'Token tidak valid' })
+  @ApiResponse({ status: 403, description: 'Akses ditolak' })
+  @ApiResponse({ status: 404, description: 'Pengguna tidak ditemukan' })
+  async updateUser(
+    @Param('id') id: string,
+    @Body() updateDto: any,
+    @Req() req: Request,
+  ) {
+    try {
+      // Prefer internal transport if available
+      // Not implemented in UsersService; fall back to HTTP directly
+      const base = process.env.USER_HTTP_URL || process.env.USER_SERVICE_HTTP_URL || 'http://127.0.0.1:8602';
+      const resp = await axios.put(`${base}/users/${encodeURIComponent(id)}`, updateDto, {
+        headers: { Authorization: (req.headers['authorization'] as string) || '' },
+        timeout: 8000,
+      });
+      return resp.data;
+    } catch (err: any) {
+      const status = err?.response?.status || 500;
+      const data = err?.response?.data || { message: 'Upstream User Service error' };
+      throw new HttpException(data, status);
+    }
   }
 
   @Delete(':id')
@@ -179,7 +249,22 @@ Registrasi pengguna baru dengan data KTP lengkap dari hasil OCR atau input manua
   @ApiResponse({ status: 401, description: 'Token tidak valid' })
   @ApiResponse({ status: 403, description: 'Akses ditolak, role tidak sesuai' })
   @ApiResponse({ status: 404, description: 'Pengguna tidak ditemukan' })
-  async remove(@Param('id') id: string) {
-    return this.usersService.delete(id);
+  async remove(@Param('id') id: string, @Req() req: Request) {
+    try {
+      return await this.usersService.delete(id);
+    } catch (e: any) {
+      try {
+        const base = process.env.USER_HTTP_URL || process.env.USER_SERVICE_HTTP_URL || 'http://127.0.0.1:8602';
+        const resp = await axios.delete(`${base}/users/${encodeURIComponent(id)}`, {
+          headers: { Authorization: (req.headers['authorization'] as string) || '' },
+          timeout: 8000,
+        });
+        return resp.data;
+      } catch (err: any) {
+        const status = err?.response?.status || 500;
+        const data = err?.response?.data || { message: 'Upstream User Service error' };
+        throw new HttpException(data, status);
+      }
+    }
   }
 }
